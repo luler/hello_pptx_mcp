@@ -16,7 +16,24 @@ import os
 import time
 import uuid
 
-from mcp.server.mcpserver import MCPServer
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError:
+    try:
+        from mcp.server.fastmcp import FastMCP as MCPServer
+    except ImportError:
+        from mcp.server import FastMCP as MCPServer
+
+try:
+    from mcp.server.transport_security import TransportSecuritySettings
+    # 允许所有域名、IP 与地址访问：彻底关闭 DNS Rebinding 限制并通配 Host/Origin
+    _transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+        allowed_hosts=["*"],
+        allowed_origins=["*"],
+    )
+except ImportError:
+    _transport_security = None
 
 from pptkit import render, store as store_mod, templates, theme as theme_mod
 from pptkit.deck import build_from_spec
@@ -47,10 +64,10 @@ def get_base_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
-server = MCPServer(
-    name="pptx-studio",
-    version="0.4.0",
-    instructions=(
+_server_kwargs = {
+    "name": "pptx-studio",
+    "version": "0.4.0",
+    "instructions": (
         "你是一个顶尖商业与科技演示文稿架构师与设计专家。\n\n"
         "【自主选择主题与版式核心法则】\n"
         "系统已内置 24 种覆盖全业务场景的高级版式库与 9 大专业色彩主题（支持自定义配色）。\n"
@@ -90,7 +107,21 @@ server = MCPServer(
         "   - 增删页面：调用 `insert_page` 或 `delete_page` 动态增删页面；\n"
         "   修改完成后，同样必须直接原样输出返回值中的 `user_display_markdown`，以图片形式直观展示最新效果。"
     ),
-)
+}
+
+if _transport_security is not None:
+    _server_kwargs["transport_security"] = _transport_security
+
+try:
+    server = MCPServer(**_server_kwargs)
+except TypeError:
+    _server_kwargs.pop("transport_security", None)
+    server = MCPServer(**_server_kwargs)
+
+if _transport_security is not None:
+    if hasattr(server, "settings") and hasattr(server.settings, "transport_security"):
+        server.settings.transport_security = _transport_security
+
 
 
 

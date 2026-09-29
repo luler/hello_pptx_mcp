@@ -84,6 +84,7 @@ class BaseUrlMiddleware:
 app.add_middleware(BaseUrlMiddleware)
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=".*",
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -96,6 +97,17 @@ app.add_middleware(
 # 实际端点会变成 /mcp/mcp（对外只留一个 307 跳转，客户端按文档配置会连不上）。
 # 因此这里把内层 path 置为 "/"，使真实端点恰好是 /mcp。
 _mcp_app = M.server.streamable_http_app(streamable_http_path="/")
+
+# 确保在反向代理（如 Nginx）环境下，MCP 会话安全中间件关闭 DNS Rebinding 强校验，开放所有域名与来源
+try:
+    _mgr = getattr(M.server, "session_manager", None) or getattr(M.server, "_session_manager", None)
+    if _mgr and hasattr(_mgr, "_security") and hasattr(_mgr._security, "settings"):
+        _mgr._security.settings.enable_dns_rebinding_protection = False
+        _mgr._security.settings.allowed_hosts = ["*"]
+        _mgr._security.settings.allowed_origins = ["*"]
+except Exception:
+    pass
+
 app.mount("/mcp", _mcp_app)
 
 
