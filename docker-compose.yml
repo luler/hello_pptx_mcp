@@ -1,0 +1,26 @@
+services:
+  pptx-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pptx-studio:latest
+    container_name: pptx-studio
+    restart: unless-stopped
+    ports:
+      - "${PORT:-48000}:48000"
+    environment:
+      - PORT=48000
+      - PPTKIT_WORKSPACE=/app/data
+      - PPTKIT_OUTPUT_DIR=/app/data/output
+      - PPTKIT_STORE_DIR=/app/data/store
+    volumes:
+      - ./data:/app/data
+      - ./pptkit:/app/pptkit
+      - ./mcp_server.py:/app/mcp_server.py
+      - ./app.py:/app/app.py
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:48000/healthz || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
