@@ -4,10 +4,12 @@
 全面升级为符合现代高管汇报与科技发布会标准的视觉原语，
 自带东亚中文字体保护（a:ea 标签）与高对比度排版引擎。
 """
+import math
 from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.oxml.ns import qn
+from pptx.dml.color import RGBColor
 
 ALIGN = {
     "left": PP_ALIGN.LEFT,
@@ -15,6 +17,22 @@ ALIGN = {
     "right": PP_ALIGN.RIGHT,
     "justify": PP_ALIGN.JUSTIFY,
 }
+
+
+def to_rgb(col):
+    """自动将 RGBColor 或 16 进制颜色字符串（如 '#FF5F56'）归一化为 RGBColor。"""
+    if col is None:
+        return None
+    if isinstance(col, RGBColor):
+        return col
+    if isinstance(col, str):
+        c = col.lstrip("#").strip()
+        if len(c) == 6:
+            try:
+                return RGBColor(int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+            except ValueError:
+                pass
+    return col
 
 
 class Canvas:
@@ -36,12 +54,12 @@ class Canvas:
             s.fill.background()
         else:
             s.fill.solid()
-            s.fill.fore_color.rgb = fill
+            s.fill.fore_color.rgb = to_rgb(fill)
 
         if line is None:
             s.line.fill.background()
         else:
-            s.line.color.rgb = line
+            s.line.color.rgb = to_rgb(line)
             s.line.width = Pt(lw)
 
         if radius is not None and shape == MSO_SHAPE.ROUNDED_RECTANGLE:
@@ -86,9 +104,18 @@ class Canvas:
         has_symbol_prefix = any(clean_text.startswith(sym) for sym in ["●", "★", "✔", "▲", "▪", "▸", "◆", "■"])
         actual_dot = dot and not has_symbol_prefix
 
-        # 估算宽度：汉字约按 0.16 字符宽，英文字母 0.09
+        # 智能紧凑宽度：数字或极短胶囊自适应紧凑尺寸，常规胶囊保持丰满大气
         char_count = sum(2 if ord(c) > 127 else 1 for c in clean_text)
-        w = max(0.9, char_count * 0.082 + (0.34 if actual_dot else 0.20) + pad_x * 2)
+        if char_count <= 2 and not actual_dot:
+            effective_pad = min(pad_x, 0.10)
+            min_w = 0.44
+        elif char_count <= 4 and not actual_dot:
+            effective_pad = min(pad_x, 0.14)
+            min_w = 0.60
+        else:
+            effective_pad = pad_x
+            min_w = 0.85
+        w = max(min_w, char_count * 0.082 + (0.34 if actual_dot else 0.14) + effective_pad * 2)
 
         # 深色模式下为徽章增加柔和微光细边框，提升在暗底卡片上的悬浮质感与辨识度
         line_col = self.pal.get("card_border") if self.pal.get("is_dark") else None
@@ -119,33 +146,141 @@ class Canvas:
 
     # ---------------- 文本排版系统 ----------------
     def tbox(self, x, y, w, h, anchor=MSO_ANCHOR.TOP, margins=0):
-        """添加文本框并清除冗余边距。"""
+        """添加文本框并清除冗余边距，记录尺寸边界并注入原生自动缩放防护。"""
         tb = self.slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
         tf = tb.text_frame
         tf.word_wrap = True
+        try:
+            tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        except Exception:
+            pass
         m = Inches(margins) if margins else 0
         tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = m
         tf.vertical_anchor = anchor
+        tf._box_w = float(w)
+        tf._box_h = float(h)
+        tf._box_x = float(x)
+        tf._box_y = float(y)
+        tf._est_used_h = 0.0
         return tf
 
     def para(self, tf, runs, size=11, color=None, bold=False, align="left",
-             before=0, after=0, line=1.2, first=False):
-        """段落构建器，支持多 run 混排与中文字体强制声明。"""
+             before=0, after=0, line=1.2, first=False, fit=True):
+        """段落构建器，支持多 run 混排、中文字体强制声明与字多/字少双向自适应排版引擎。"""
         def_color = color or self.pal.get("text_body", self.pal["text"])
         p = tf.paragraphs[0] if first else tf.add_paragraph()
         p.alignment = ALIGN.get(align, PP_ALIGN.LEFT)
-        p.space_before = Pt(before)
-        p.space_after = Pt(after)
-        p.line_spacing = line
+
+        if first:
+            tf._est_used_h = 0.0
 
         if isinstance(runs, str):
             runs = [(runs, {})]
 
+        # ---------------- 双向自适应字号与防溢出算法 ----------------
+        box_w = getattr(tf, "_box_w", None)
+        box_h = getattr(tf, "_box_h", None)
+        used_h = getattr(tf, "_est_used_h", 0.0)
+
+        eff_size = float(size)
+        eff_line = float(line)
+        eff_before = float(before)
+        eff_after = float(after)
+
+        if fit and box_w and box_h and box_w > 0.3 and box_h > 0.2:
+            avail_h = max(0.1, box_h - used_h)
+            full_text = "".join(str(t) for t, _ in runs)
+            # 计算等效中文字符数（CJK 占 1.0 字符位，ASCII/英文占 0.52 字符位）
+            eff_chars = sum(1.0 if ord(c) > 127 else 0.52 for c in full_text)
+
+            if eff_chars > 0:
+                # 1. 字少自适应饱满提号（Anti-Hollow Boost）：当单段落文字较短且文本框高大时
+                if first and box_h >= 1.1 and avail_h >= 0.9 and eff_chars <= 45 and size <= 11.5:
+                    cpl_base = max(1.0, (box_w * 72.0) / (size * 1.05))
+                    lines_base = math.ceil(eff_chars / cpl_base)
+                    h_base = (lines_base * size * line + before + after) / 72.0
+                    if h_base < avail_h * 0.45:
+                        boost = min(2.0, max(0.5, (avail_h - h_base) * 1.5))
+                        eff_size = min(14.0, size + boost)
+                        eff_line = min(1.42, line + 0.12)
+
+                # 2. 字多自适应降号防御（Anti-Overflow Downscaling）
+                cpl = max(1.0, (box_w * 72.0) / (eff_size * 1.05))
+                lines = math.ceil(eff_chars / cpl)
+                h_needed = (lines * eff_size * eff_line + eff_before + eff_after) / 72.0
+
+                if h_needed > avail_h:
+                    fitted = False
+                    for try_s in [eff_size - 1.0, eff_size - 1.8, eff_size - 2.5, eff_size - 3.2, 8.5, 7.5]:
+                        if try_s < 7.5:
+                            break
+                        try_l = max(1.10, min(eff_line, 1.16))
+                        try_cpl = max(1.0, (box_w * 72.0) / (try_s * 1.05))
+                        try_lines = math.ceil(eff_chars / try_cpl)
+                        try_h = (try_lines * try_s * try_l + eff_before * 0.6 + eff_after * 0.6) / 72.0
+                        if try_h <= avail_h * 1.03:
+                            eff_size = try_s
+                            eff_line = try_l
+                            eff_before *= 0.6
+                            eff_after *= 0.6
+                            fitted = True
+                            break
+
+                    # 3. 极度拥挤熔断截断（防止溢出穿透破坏整体卡片/遮挡其他模块）
+                    if not fitted:
+                        eff_size = 7.5
+                        eff_line = 1.10
+                        max_lines = max(1, int((avail_h * 72.0) / (7.5 * 1.10)))
+                        max_cpl = (box_w * 72.0) / (7.5 * 1.05)
+                        max_eff = max(6.0, max_lines * max_cpl * 0.90)
+
+                        cur_eff = 0.0
+                        new_runs = []
+                        truncated = False
+                        for t_str, o_dict in runs:
+                            t_s = str(t_str)
+                            if truncated:
+                                break
+                            r_eff = sum(1.0 if ord(c) > 127 else 0.52 for c in t_s)
+                            if cur_eff + r_eff <= max_eff:
+                                new_runs.append((t_s, o_dict))
+                                cur_eff += r_eff
+                            else:
+                                remain_eff = max(0, max_eff - cur_eff)
+                                sub_chars = []
+                                sub_count = 0.0
+                                for ch in t_s:
+                                    ch_w = 1.0 if ord(ch) > 127 else 0.52
+                                    if sub_count + ch_w <= remain_eff:
+                                        sub_chars.append(ch)
+                                        sub_count += ch_w
+                                    else:
+                                        break
+                                cut_str = "".join(sub_chars).rstrip() + "..."
+                                new_runs.append((cut_str, o_dict))
+                                truncated = True
+                                break
+                        if new_runs:
+                            runs = new_runs
+
+        scale = eff_size / float(size) if size else 1.0
+        p.space_before = Pt(eff_before)
+        p.space_after = Pt(eff_after)
+        p.line_spacing = eff_line
+
+        # 估算实际占用高度
+        cpl_final = max(1.0, (box_w * 72.0) / (eff_size * 1.05)) if box_w else 40.0
+        full_t = "".join(str(t) for t, _ in runs)
+        eff_c = sum(1.0 if ord(c) > 127 else 0.52 for c in full_t)
+        lines_final = math.ceil(eff_c / cpl_final) if eff_c > 0 else 1
+        tf._est_used_h = used_h + (lines_final * eff_size * eff_line + eff_before + eff_after) / 72.0
+
         for text, o in runs:
             r = p.add_run()
-            r.text = text
+            r.text = str(text)
             r.font.name = o.get("font", self.font_latin)
-            r.font.size = Pt(o.get("sz", size))
+            run_sz = o.get("sz", size) * scale
+            r.font.size = Pt(max(7.5, run_sz))
             run_color = o.get("c")
             r.font.bold = o.get("b", bold)
             r.font.color.rgb = def_color if run_color is None else run_color

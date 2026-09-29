@@ -22,12 +22,23 @@ def bar_chart(cv, x, y, w, h, categories, series, max_value=None,
         pal.get("accent", pal["accent"]),
         pal.get("primary_mid", pal["primary"]),
     ]
-    n_cat, n_ser = len(categories), len(series)
-    if n_cat == 0 or n_ser == 0:
+    n_cat = len(categories) if categories else 0
+    if not series or n_cat == 0:
         return
 
-    flat = [float(v) for s in series for v in s.get("values", [])]
-    top = float(max_value or (max(flat) if flat else 1) or 1)
+    # 兼容处理：若 series 为字典或一维数字列表，自动归一化为列表
+    if isinstance(series, dict):
+        series = [series]
+    elif isinstance(series, list) and len(series) > 0 and isinstance(series[0], (int, float)):
+        series = [{"name": "数值", "values": series}]
+
+    n_ser = len(series)
+    if n_ser == 0:
+        return
+
+    flat = [float(v) for s in series if isinstance(s, dict) for v in s.get("values", [])]
+    # 顶部预留 18% 缓冲区，防止柱顶数值标签与图例或面板标题冲突碰撞
+    top = float(max_value or (max(flat) * 1.18 if flat else 1) or 1)
     if top <= 0:
         top = 1.0
 
@@ -121,4 +132,180 @@ def progress_bar(cv, x, y, w, h, ratio, fill=None, bg=None, label=None,
         cv.text(x + track_w + 0.08, y - 0.04, label_w, h + 0.08, label_str,
                 size=label_size, bold=True, color=fill_col,
                 anchor=MSO_ANCHOR.MIDDLE)
+
+
+def line_chart(cv, x, y, w, h, categories, series, legend=None, is_area=False, data_labels=None):
+    """原生平滑折线图与面积渐变图（支持多系列、坐标轴美化与主题调色）。"""
+    from pptx.util import Inches, Pt
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+    from .primitives import to_rgb
+
+    pal = cv.pal
+    colors = pal.get("chart_colors") or pal.get("accents") or [
+        pal.get("primary", pal["primary"]),
+        pal.get("accent2", pal["accent"]),
+        pal.get("accent", pal["accent"]),
+        pal.get("primary_mid", pal["primary"]),
+    ]
+    rgb_colors = [to_rgb(c) for c in colors]
+
+    cd = CategoryChartData()
+    cd.categories = [str(c) for c in categories]
+
+    if isinstance(series, dict):
+        series = [series]
+    elif isinstance(series, list) and len(series) > 0 and isinstance(series[0], (int, float)):
+        series = [{"name": "趋势", "values": series}]
+
+    for s in series:
+        if isinstance(s, dict):
+            cd.add_series(str(s.get("name", "系列")), s.get("values", []))
+
+    chart_type = XL_CHART_TYPE.AREA if is_area else XL_CHART_TYPE.LINE
+    shape = cv.slide.shapes.add_chart(chart_type, Inches(x), Inches(y), Inches(w), Inches(h), cd)
+    chart = shape.chart
+    chart.has_title = False
+
+    text_muted_rgb = to_rgb(pal.get("text_muted", pal["text"]))
+    text_body_rgb = to_rgb(pal.get("text_body", pal["text"]))
+
+    # 轴刻度文本颜色与字体自适应主题（深色模式下自动转为通透白/冷灰，杜绝发黑）
+    try:
+        chart.category_axis.tick_labels.font.color.rgb = text_muted_rgb
+        chart.category_axis.tick_labels.font.size = Pt(8.5)
+        chart.value_axis.tick_labels.font.color.rgb = text_muted_rgb
+        chart.value_axis.tick_labels.font.size = Pt(8.5)
+    except Exception:
+        pass
+
+    show_legend = (len(series) > 1) if legend is None else bool(legend)
+    chart.has_legend = show_legend
+    if show_legend:
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        chart.legend.font.size = Pt(8.5)
+        try:
+            chart.legend.font.color.rgb = text_muted_rgb
+        except Exception:
+            pass
+
+    # 面积图默认不打数据标签以免重叠，折线图根据参数或系列规模自适应
+    if data_labels is None:
+        show_labels = (not is_area) and (len(categories) <= 6) and (len(series) <= 2)
+    else:
+        show_labels = bool(data_labels)
+
+    chart.plots[0].has_data_labels = show_labels
+    if show_labels:
+        try:
+            chart.plots[0].data_labels.font.size = Pt(8.5)
+            chart.plots[0].data_labels.font.color.rgb = text_body_rgb
+        except Exception:
+            pass
+
+    for i, s_obj in enumerate(chart.series):
+        col = rgb_colors[i % len(rgb_colors)]
+        try:
+            s_obj.format.line.color.rgb = col
+            s_obj.format.line.width = Pt(2.5)
+            if is_area:
+                s_obj.format.fill.solid()
+                s_obj.format.fill.fore_color.rgb = col
+        except Exception:
+            pass
+
+
+def pie_chart(cv, x, y, w, h, categories, series_or_values, legend=True, is_doughnut=False, data_labels=None):
+    """原生环形图（Donut）与饼图（Pie），自适应主题色调与数据标签。"""
+    from pptx.util import Inches, Pt
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+    from .primitives import to_rgb
+
+    pal = cv.pal
+    colors = pal.get("chart_colors") or pal.get("accents") or [
+        pal.get("primary", pal["primary"]),
+        pal.get("accent2", pal["accent"]),
+        pal.get("accent", pal["accent"]),
+        pal.get("primary_mid", pal["primary"]),
+    ]
+    rgb_colors = [to_rgb(c) for c in colors]
+
+    cd = CategoryChartData()
+    cd.categories = [str(c) for c in categories]
+
+    if isinstance(series_or_values, dict):
+        vals = series_or_values.get("values", [])
+        s_name = series_or_values.get("name", "占比")
+    elif isinstance(series_or_values, list) and len(series_or_values) > 0:
+        if isinstance(series_or_values[0], dict):
+            vals = series_or_values[0].get("values", [])
+            s_name = series_or_values[0].get("name", "占比")
+        else:
+            vals = series_or_values
+            s_name = "占比"
+    else:
+        vals = []
+        s_name = "占比"
+
+    cd.add_series(s_name, vals)
+
+    chart_type = XL_CHART_TYPE.DOUGHNUT if is_doughnut else XL_CHART_TYPE.PIE
+    shape = cv.slide.shapes.add_chart(chart_type, Inches(x), Inches(y), Inches(w), Inches(h), cd)
+    chart = shape.chart
+    chart.has_title = False
+
+    text_muted_rgb = to_rgb(pal.get("text_muted", pal["text"]))
+    text_body_rgb = to_rgb(pal.get("text_body", pal["text"]))
+
+    chart.has_legend = bool(legend)
+    if legend:
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        chart.legend.font.size = Pt(8.5)
+        try:
+            chart.legend.font.color.rgb = text_muted_rgb
+        except Exception:
+            pass
+
+    show_labels = True if data_labels is None else bool(data_labels)
+    chart.plots[0].has_data_labels = show_labels
+    if show_labels:
+        try:
+            from pptx.dml.color import RGBColor
+            chart.plots[0].data_labels.font.size = Pt(9.0)
+            chart.plots[0].data_labels.font.bold = True
+            chart.plots[0].data_labels.font.color.rgb = RGBColor(255, 255, 255)
+        except Exception:
+            pass
+
+    try:
+        for i, pt in enumerate(chart.plots[0].series[0].points):
+            col = rgb_colors[i % len(rgb_colors)]
+            pt.format.fill.solid()
+            pt.format.fill.fore_color.rgb = col
+    except Exception:
+        pass
+
+
+def render_chart(cv, x, y, w, h, chart_spec):
+    """统一图表分发引擎：根据 spec.type 分发至柱状图、折线图、面积图、饼图或环形图。"""
+    if not isinstance(chart_spec, dict):
+        return
+    ctype = str(chart_spec.get("type", "bar")).lower()
+    cats = chart_spec.get("categories") or chart_spec.get("labels") or []
+    series = chart_spec.get("series") or chart_spec.get("values") or []
+    legend = chart_spec.get("legend")
+    data_labels = chart_spec.get("data_labels")
+
+    if ctype in ("line", "trend"):
+        line_chart(cv, x, y, w, h, cats, series, legend=legend, is_area=False, data_labels=data_labels)
+    elif ctype in ("area", "area_chart"):
+        line_chart(cv, x, y, w, h, cats, series, legend=legend, is_area=True, data_labels=data_labels)
+    elif ctype in ("pie", "pie_chart"):
+        pie_chart(cv, x, y, w, h, cats, series, legend=True if legend is None else bool(legend), is_doughnut=False, data_labels=data_labels)
+    elif ctype in ("doughnut", "donut", "ring"):
+        pie_chart(cv, x, y, w, h, cats, series, legend=True if legend is None else bool(legend), is_doughnut=True, data_labels=data_labels)
+    else:
+        bar_chart(cv, x, y, w, h, cats, series, legend=legend)
+
 

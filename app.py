@@ -3,6 +3,13 @@
 
     uvicorn app:app --host 0.0.0.0 --port 48000
 
+管理后台：
+    GET  /admin              现代化 PPTX 资产在线管理后台 (SPA)
+    GET  /manage             管理后台别名
+    POST /api/admin/verify   校验 AUTH_KEY 授权
+    GET  /api/admin/files    已生成文稿列表（按时间倒序）
+    POST /api/admin/delete   批量彻底删除文稿及预览图
+
 REST 端点（便于 curl / 前端直接调用）：
     GET  /                   服务与端点说明
     GET  /healthz            健康检查
@@ -24,17 +31,96 @@ from __future__ import annotations
 import contextlib
 import glob
 import os
+import shutil
+import time
+from urllib.parse import parse_qs
 
-
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 import mcp_server as M
 from pptkit import theme as theme_mod, templates
 from pptkit.deck import build_from_spec
+from web_admin import get_admin_html
 
+# 读取环境变量中的授权密钥
+AUTH_KEY = os.environ.get("AUTH_KEY", "").strip()
+
+
+def check_auth(authorization: str | None = None, auth_key: str | None = None) -> bool:
+    """若服务端配置了 AUTH_KEY，验证 Authorization 请求头或 URL Query 参数 auth_key。"""
+    if not AUTH_KEY:
+        return True  # 未设置密钥时全量放行（向下兼容）
+
+    # 1. 检查 Authorization: Bearer <AUTH_KEY>
+    if authorization:
+        parts = authorization.strip().split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            if parts[1] == AUTH_KEY:
+                return True
+        elif len(parts) == 1 and parts[0] == AUTH_KEY:
+            return True
+
+    # 2. 检查 Query 参数 ?auth_key=<AUTH_KEY>（用于 <img> 预览和 <a> 下载等无法自定义 Header 的场景）
+    if auth_key and auth_key == AUTH_KEY:
+        return True
+
+    return False
+
+
+def _delete_presentation_and_preview(item_id: str) -> bool:
+    """彻底删除演示文稿实体文件及其对应关联的高清预览图缓存目录。"""
+    found = False
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        return False
+
+    rec = M.STORE.get(item_id)
+    target_path = None
+    target_name = None
+
+    if rec:
+        target_path = rec.get("path")
+        target_name = rec.get("name")
+        M.STORE.delete(rec["id"])
+        found = True
+
+    if not target_path or not os.path.exists(target_path):
+        cand = os.path.join(M.OUTPUT_DIR, item_id)
+        if not os.path.exists(cand) and not cand.endswith(".pptx"):
+            cand += ".pptx"
+        if os.path.exists(cand):
+            target_path = cand
+            target_name = os.path.basename(cand)
+
+    if target_path and os.path.exists(target_path):
+        try:
+            os.remove(target_path)
+            found = True
+        except OSError:
+            pass
+
+    # 清理关联的 preview 预览图目录
+    name_for_slug = target_name or item_id
+    stem = os.path.splitext(name_for_slug)[0]
+    slug = M._slug(stem, "deck")
+
+    dirs_to_clean = {
+        os.path.join(M.OUTPUT_DIR, "preview", slug),
+        os.path.join(M.OUTPUT_DIR, "preview", stem),
+        os.path.join(M.OUTPUT_DIR, "preview", item_id),
+    }
+    if target_path:
+        dirs_to_clean.add(os.path.join(os.path.dirname(target_path), "preview", slug))
+
+    for pv in dirs_to_clean:
+        if os.path.isdir(pv):
+            shutil.rmtree(pv, ignore_errors=True)
+            found = True
+
+    return found
 
 
 class SpecIn(BaseModel):
@@ -46,6 +132,14 @@ class SpecIn(BaseModel):
 
 class PageUpdateIn(BaseModel):
     page_spec: dict = Field(..., description="更新后的单页 spec 定义（必须含 layout）")
+
+
+class VerifyIn(BaseModel):
+    key: str = ""
+
+
+class BatchDeleteIn(BaseModel):
+    ids: list[str] = Field(default_factory=list, description="待删除的文稿 ID 或文件名列表")
 
 
 @contextlib.asynccontextmanager
@@ -73,16 +167,26 @@ except Exception:
 
 
 class BaseUrlMiddleware:
-    """纯 ASGI 中间件：提取 HTTP 客户端真实请求的协议与 Host 头，注入上下文供 URL 动态拼接。"""
+    """纯 ASGI 中间件：
+    1. 提取 HTTP 客户端真实请求的协议与 Host 头，注入上下文供 URL 动态拼接；
+    2. 解决 /mcp 重定向问题；
+    3. 若配置了 AUTH_KEY，拦截并验证 /mcp 端点的 Bearer 授权请求头。
+    """
     def __init__(self, inner_app):
         self.inner_app = inner_app
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
+            path = scope.get("path", "")
+            method = scope.get("method", "GET").upper()
+
             # 解决客户端请求 /mcp 时被 Starlette 307 重定向的问题（免去 307 跳转）
-            if scope.get("path") == "/mcp":
+            if path == "/mcp":
+                path = "/mcp/"
                 scope["path"] = "/mcp/"
-            headers = dict(scope.get("headers", []))
+
+            headers_list = scope.get("headers", [])
+            headers = dict(headers_list)
             x_proto = headers.get(b"x-forwarded-proto", b"").decode("latin-1")
             proto = x_proto or scope.get("scheme", "http")
             x_host = headers.get(b"x-forwarded-host", b"").decode("latin-1")
@@ -90,6 +194,43 @@ class BaseUrlMiddleware:
             host = x_host or host_header or ""
             if host:
                 M.current_request_base_url.set(f"{proto}://{host}")
+
+            # 若配置了 AUTH_KEY，对 /mcp 及其所有子路由强制要求 Bearer 授权（放行 OPTIONS 跨域预检）
+            if AUTH_KEY and (path == "/mcp" or path.startswith("/mcp/")):
+                if method != "OPTIONS":
+                    auth_header = headers.get(b"authorization", b"").decode("latin-1").strip()
+                    authorized = False
+                    if auth_header:
+                        parts = auth_header.split()
+                        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1] == AUTH_KEY:
+                            authorized = True
+                        elif len(parts) == 1 and parts[0] == AUTH_KEY:
+                            authorized = True
+
+                    if not authorized:
+                        query_str = scope.get("query_string", b"").decode("latin-1")
+                        qs = parse_qs(query_str)
+                        if qs.get("auth_key", [None])[0] == AUTH_KEY or qs.get("token", [None])[0] == AUTH_KEY:
+                            authorized = True
+
+                    if not authorized:
+                        body = b'{"error": "Unauthorized: missing or invalid Bearer token"}\n'
+                        await send({
+                            "type": "http.response.start",
+                            "status": 401,
+                            "headers": [
+                                (b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode("ascii")),
+                                (b"www-authenticate", b'Bearer realm="pptx-studio"'),
+                                (b"access-control-allow-origin", b"*"),
+                            ],
+                        })
+                        await send({
+                            "type": "http.response.body",
+                            "body": body,
+                        })
+                        return
+
         await self.inner_app(scope, receive, send)
 
 
@@ -105,12 +246,8 @@ app.add_middleware(
 
 
 # MCP 端点挂在 /mcp（Streamable HTTP）。
-# 注意：streamable_http_app() 内部默认自带 path="/mcp"，若直接 mount("/mcp", ...)
-# 实际端点会变成 /mcp/mcp（对外只留一个 307 跳转，客户端按文档配置会连不上）。
-# 因此这里把内层 path 置为 "/"，使真实端点恰好是 /mcp。
 _mcp_app = M.server.streamable_http_app(streamable_http_path="/")
 
-# 确保在反向代理（如 Nginx）环境下，MCP 会话安全中间件关闭 DNS Rebinding 强校验，开放所有域名与来源
 try:
     _mgr = getattr(M.server, "session_manager", None) or getattr(M.server, "_session_manager", None)
     if _mgr:
@@ -128,14 +265,245 @@ except Exception:
 app.mount("/mcp", _mcp_app)
 
 
+# ==================== 管理后台前端页面 ====================
+
+@app.get("/admin", response_class=HTMLResponse)
+@app.get("/manage", response_class=HTMLResponse)
+def admin_page():
+    """现代化 PPTX 资产在线管理后台 (SPA)。"""
+    return HTMLResponse(get_admin_html())
+
+
+# ==================== 管理后台 API 接口 ====================
+
+# 内存元数据与页数轻量级缓存：file_path -> (mtime, pages_count, title)
+_PPTX_META_CACHE: dict[str, tuple[float, int, str]] = {}
+
+
+def _resolve_pptx_meta(file_path: str, mtime: float, fname: str, store_rec: dict | None = None) -> tuple[int, str]:
+    """快速探测 PPTX 文件的总页数与标题，并在内存中基于 mtime 建立高命中缓存，避免重复打开文件。"""
+    stem = os.path.splitext(fname)[0]
+
+    # 1. 优先命中内存缓存（文件 mtime 未变动）
+    cached = _PPTX_META_CACHE.get(file_path)
+    if cached and cached[0] == mtime:
+        return cached[1], cached[2]
+
+    # 2. 标题提取：优先从 store spec 提取
+    title = fname
+    spec = store_rec.get("spec") if store_rec else None
+    if spec and isinstance(spec, dict):
+        title = spec.get("meta", {}).get("title") or spec.get("title") or fname
+
+    # 3. 页数提取：优先检查 preview 截图数量（最快，0 次解析）
+    pages_count = 1
+    pv_dir = os.path.join(M.OUTPUT_DIR, "preview", M._slug(stem, "deck"))
+    existing_pngs = glob.glob(os.path.join(pv_dir, "page_*.png"))
+    if existing_pngs:
+        pages_count = len(existing_pngs)
+    elif spec and isinstance(spec, dict) and spec.get("pages"):
+        pages_count = len(spec["pages"])
+    else:
+        # 仅当没有截图也没有 spec 时才轻度解析单文件
+        try:
+            from pptx import Presentation
+            prs = Presentation(file_path)
+            pages_count = len(prs.slides)
+            if title == fname and prs.slides:
+                for shape in prs.slides[0].shapes:
+                    if shape.has_text_frame and shape.text_frame.text.strip():
+                        first_line = shape.text_frame.text.strip().split("\n")[0]
+                        if len(first_line) <= 50:
+                            title = first_line
+                        break
+        except Exception:
+            pages_count = 1
+
+    # 写入缓存
+    _PPTX_META_CACHE[file_path] = (mtime, pages_count, title)
+    return pages_count, title
+
+
+@app.post("/api/admin/verify")
+def api_admin_verify(
+    payload: VerifyIn | None = None,
+    authorization: str | None = Header(None),
+):
+    """校验管理员访问凭证。"""
+    if not AUTH_KEY:
+        return {"ok": True, "auth_required": False}
+
+    candidate = (payload.key if payload else "") or ""
+    if not candidate and authorization:
+        parts = authorization.strip().split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            candidate = parts[1]
+        elif len(parts) == 1:
+            candidate = parts[0]
+
+    if candidate == AUTH_KEY:
+        return {"ok": True, "auth_required": True}
+    raise HTTPException(status_code=401, detail="Invalid AUTH_KEY")
+
+
+@app.get("/api/admin/files")
+def api_admin_files(
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+    page: int = Query(1, ge=1, description="当前页码（从 1 开始）"),
+    page_size: int = Query(15, ge=1, le=200, description="每页显示条数"),
+    search: str = Query("", description="搜索关键词（匹配文件名或标题）"),
+):
+    """获取已生成的 PPTX 文稿资产列表（严格按生成/修改时间倒序排列，支持服务端毫秒级分页与极速缓存）。"""
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
+    store_items = {it["name"]: it for it in M.STORE.list(kind="pptx", limit=10000)}
+
+    # 1. 毫秒级极速扫描磁盘：利用 os.scandir 只提取文件名、最后修改时间与大小，绝不打开文件
+    scanned_files = []
+    total_disk_bytes = 0
+
+    if os.path.exists(M.OUTPUT_DIR):
+        try:
+            with os.scandir(M.OUTPUT_DIR) as it:
+                for entry in it:
+                    if entry.is_file() and entry.name.lower().endswith(".pptx"):
+                        try:
+                            st = entry.stat()
+                            scanned_files.append({
+                                "filename": entry.name,
+                                "path": entry.path,
+                                "mtime": st.st_mtime,
+                                "size_bytes": st.st_size,
+                            })
+                            total_disk_bytes += st.st_size
+                        except OSError:
+                            continue
+        except OSError:
+            pass
+
+    # 补充 STORE 中可能位于其他路径的条目
+    scanned_names = {f["filename"] for f in scanned_files}
+    for rec in store_items.values():
+        fname = rec["name"]
+        if fname not in scanned_names and os.path.exists(rec.get("path", "")):
+            try:
+                st = os.stat(rec["path"])
+                scanned_files.append({
+                    "filename": fname,
+                    "path": rec["path"],
+                    "mtime": st.st_mtime,
+                    "size_bytes": st.st_size,
+                })
+                total_disk_bytes += st.st_size
+                scanned_names.add(fname)
+            except OSError:
+                continue
+
+    # 2. 严格按最后修改时间倒序排序（最新生成的在前）
+    scanned_files.sort(key=lambda x: x["mtime"], reverse=True)
+
+    # 3. 关键词过滤（若有搜索项，在内存中快速过滤）
+    search_term = search.strip().lower()
+    if search_term:
+        filtered = []
+        for f in scanned_files:
+            fname = f["filename"]
+            rec = store_items.get(fname)
+            cached = _PPTX_META_CACHE.get(f["path"])
+            cached_title = cached[2] if cached else ""
+            store_title = (rec.get("spec", {}).get("meta", {}).get("title") or "") if rec else ""
+            if search_term in fname.lower() or search_term in cached_title.lower() or search_term in store_title.lower():
+                filtered.append(f)
+        scanned_files = filtered
+
+    total = len(scanned_files)
+    import math
+    total_pages = max(1, math.ceil(total / page_size)) if total > 0 else 1
+    current_page = min(page, total_pages)
+
+    # 4. 关键性能优化：仅对当前分页切片（如前 15~20 条）做详细页数与标题解析！
+    start_idx = (current_page - 1) * page_size
+    end_idx = start_idx + page_size
+    current_slice = scanned_files[start_idx:end_idx]
+
+    items = []
+    for f in current_slice:
+        fname = f["filename"]
+        file_path = f["path"]
+        mtime = f["mtime"]
+        size_bytes = f["size_bytes"]
+        stem = os.path.splitext(fname)[0]
+
+        rec = store_items.get(fname)
+        item_id = rec["id"] if rec else stem
+
+        pages_count, title = _resolve_pptx_meta(file_path, mtime, fname, store_rec=rec)
+        created_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+
+        items.append({
+            "id": item_id,
+            "filename": fname,
+            "title": title,
+            "pages_count": pages_count,
+            "size_bytes": size_bytes,
+            "mtime": mtime,
+            "created_at": created_at,
+            "thumbnail_url": f"/api/preview/{item_id}?page=1",
+            "download_url": f"/api/download/{fname}",
+        })
+
+    return {
+        "ok": True,
+        "auth_required": bool(AUTH_KEY),
+        "total": total,
+        "total_disk_bytes": total_disk_bytes,
+        "page": current_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "items": items,
+    }
+
+
+@app.post("/api/admin/delete")
+def api_admin_batch_delete(
+    payload: BatchDeleteIn,
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    """批量彻底删除 PPTX 文稿资产及其预览截图缓存。"""
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
+    deleted_count = 0
+    deleted_ids = []
+    for item_id in payload.ids:
+        if _delete_presentation_and_preview(item_id):
+            deleted_count += 1
+            deleted_ids.append(item_id)
+
+    return {
+        "ok": True,
+        "deleted_count": deleted_count,
+        "deleted_ids": deleted_ids,
+    }
+
+
+# ==================== 核心业务与 REST 端点 ====================
+
 @app.get("/")
 def index():
     return {
         "service": "pptx-studio",
         "version": "0.2.0",
+        "auth_required": bool(AUTH_KEY),
+        "admin_ui": "/admin",
         "mcp_endpoint": "/mcp",
         "docs": "/docs",
         "endpoints": [
+            "GET /admin", "GET /manage", "GET /api/admin/files",
+            "POST /api/admin/verify", "POST /api/admin/delete",
             "GET /healthz", "GET /api/themes", "GET /api/templates",
             "GET /api/templates/{name}", "POST /api/validate",
             "POST /api/generate", "POST /api/artifacts/{id}/page/{page_number}",
@@ -156,6 +524,7 @@ def index():
 def healthz():
     return {
         "ok": True,
+        "auth_required": bool(AUTH_KEY),
         "preview_available": M.render.available(),
         "artifacts": len(M.STORE.list(limit=10000)),
         "base_url": M.get_base_url(),
@@ -201,7 +570,14 @@ def api_validate(payload: SpecIn):
 
 
 @app.post("/api/generate")
-def api_generate(payload: SpecIn):
+def api_generate(
+    payload: SpecIn,
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
     errs = M._validate_spec(payload.spec)
     if errs:
         raise HTTPException(status_code=422, detail=errs)
@@ -267,7 +643,16 @@ def api_generate(payload: SpecIn):
 
 
 @app.post("/api/artifacts/{item_id:path}/page/{page_number}")
-def api_update_page(item_id: str, page_number: int, payload: PageUpdateIn):
+def api_update_page(
+    item_id: str,
+    page_number: int,
+    payload: PageUpdateIn,
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
     res = M.update_page(item_id, page_number, payload.page_spec)
     data = M.json.loads(res[0])
     if not data.get("ok"):
@@ -276,12 +661,25 @@ def api_update_page(item_id: str, page_number: int, payload: PageUpdateIn):
 
 
 @app.get("/api/artifacts")
-def api_artifacts(kind: str = "", limit: int = Query(25, ge=1, le=200)):
+def api_artifacts(
+    kind: str = "",
+    limit: int = Query(25, ge=1, le=200),
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
     return {"items": M.STORE.list(kind=kind or None, limit=limit)}
 
 
 @app.get("/api/artifacts/{item_id}")
-def api_artifact(item_id: str):
+def api_artifact(
+    item_id: str,
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
     rec = M.STORE.get(item_id)
     if not rec:
         raise HTTPException(status_code=404, detail="产物不存在")
@@ -289,7 +687,14 @@ def api_artifact(item_id: str):
 
 
 @app.get("/api/download/{item_id:path}")
-def api_download(item_id: str):
+def api_download(
+    item_id: str,
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
     try:
         path = M.STORE.path_of(item_id)
     except Exception:
@@ -300,6 +705,7 @@ def api_download(item_id: str):
             path = cand
         else:
             raise HTTPException(status_code=404, detail=f"文件不存在: {item_id}")
+
     media_type = (
         "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         if path.lower().endswith(".pptx")
@@ -309,7 +715,15 @@ def api_download(item_id: str):
 
 
 @app.get("/api/preview/{item_id:path}")
-def api_preview(item_id: str, page: int = Query(1, ge=1)):
+def api_preview(
+    item_id: str,
+    page: int = Query(1, ge=1),
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
     try:
         path = M.STORE.path_of(item_id)
     except Exception:
@@ -351,12 +765,17 @@ def api_preview(item_id: str, page: int = Query(1, ge=1)):
     return FileResponse(pngs[page - 1], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
-
 @app.delete("/api/artifacts/{item_id}")
-def api_delete(item_id: str):
-    if not M.STORE.get(item_id):
-        raise HTTPException(status_code=404, detail="产物不存在")
-    M.STORE.delete(item_id)
+def api_delete(
+    item_id: str,
+    authorization: str | None = Header(None),
+    auth_key: str | None = Query(None),
+):
+    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+
+    if not _delete_presentation_and_preview(item_id):
+        raise HTTPException(status_code=404, detail="产物不存在或已被删除")
     return {"ok": True, "deleted": item_id}
 
 

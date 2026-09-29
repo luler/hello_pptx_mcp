@@ -102,3 +102,30 @@ server {
 | `PPTKIT_WORKSPACE` | `/app/data` | 工作目录（挂载数据持久化） |
 | `PPTKIT_OUTPUT_DIR` | `/app/data/output` | PPTX / 预览图保存路径 |
 | `PPTKIT_STORE_DIR` | `/app/data/store` | 产物持久化索引路径 |
+| `AUTH_KEY` | *(留空)* | 访问鉴权密钥。留空免密放行；非空时 `/mcp` 与管理后台强制开启鉴权 |
+
+---
+
+## 🖥️ 在线资产管理后台
+
+访问 `http://<服务器IP或域名>:48000/admin` 或 `/manage` 即可进入现代化 PPTX 文稿管理中心：
+- 🕒 **时间倒序排列**：最新生成的文稿展示在最上方；
+- 🖼️ **全景高清大图预览**：内置全屏灯箱，支持微缩底栏点选、键盘 `←` / `→` 键极速翻页；
+- 🗑️ **批量彻底删除**：支持多选勾选、全选、批量清理文稿及关联的逐页预览截图目录；
+- 🔒 **安全访问控制**：配置 `AUTH_KEY` 后，管理后台与 MCP 路由自动启用凭据验证。
+
+若启用了 `AUTH_KEY`，MCP 客户端配置如下：
+
+```json
+{
+  "mcpServers": {
+    "pptx-studio": {
+      "type": "http",
+      "url": "http://<你的服务器IP或域名>:48000/mcp",
+      "headers": {
+        "Authorization": "Bearer 你的AUTH_KEY"
+      }
+    }
+  }
+}
+```
