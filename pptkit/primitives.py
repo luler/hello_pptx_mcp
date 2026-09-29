@@ -81,17 +81,24 @@ class Canvas:
         tx_col = text_color or self.pal.get("badge_text", self.pal["primary"])
         dot_col = dot_color or self.pal.get("accent", self.pal["primary"])
 
-        # 估算宽度：汉字约按 0.16 字符宽，英文字母 0.09
-        char_count = sum(2 if ord(c) > 127 else 1 for c in str(text))
-        w = max(0.9, char_count * 0.082 + (0.34 if dot else 0.20) + pad_x * 2)
+        # 智能规避：如果文本自身以特殊前缀符号开头，则自动不重复添加圆点
+        clean_text = str(text).strip()
+        has_symbol_prefix = any(clean_text.startswith(sym) for sym in ["●", "★", "✔", "▲", "▪", "▸", "◆", "■"])
+        actual_dot = dot and not has_symbol_prefix
 
-        self.pill(x, y, w, h, fill=bg_col, line=None)
+        # 估算宽度：汉字约按 0.16 字符宽，英文字母 0.09
+        char_count = sum(2 if ord(c) > 127 else 1 for c in clean_text)
+        w = max(0.9, char_count * 0.082 + (0.34 if actual_dot else 0.20) + pad_x * 2)
+
+        # 深色模式下为徽章增加柔和微光细边框，提升在暗底卡片上的悬浮质感与辨识度
+        line_col = self.pal.get("card_border") if self.pal.get("is_dark") else None
+        self.pill(x, y, w, h, fill=bg_col, line=line_col)
         tf = self.tbox(x, y, w, h, anchor=MSO_ANCHOR.MIDDLE)
 
         runs = []
-        if dot:
+        if actual_dot:
             runs.append(("●  ", {"c": dot_col, "b": True, "sz": size - 1.5}))
-        runs.append((str(text), {"c": tx_col, "b": True, "sz": size}))
+        runs.append((clean_text, {"c": tx_col, "b": True, "sz": size}))
 
         self.para(tf, runs, first=True, align="center")
         return x + w

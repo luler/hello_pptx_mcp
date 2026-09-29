@@ -83,12 +83,12 @@ server = MCPServer(
         "【大模型生成与用户交互工作流】\n"
         "1. 设计规划：调用 `get_design_guide(topic)` 了解匹配的主题与版式推荐；\n"
         "2. 生成演示文稿：调用 `create_presentation` 依据 spec 一键生成 PPTX，系统自动渲染出每一页的高清预览截图链接（preview_urls）并生成 PPTX 下载链接（download_url）；\n"
-        "3. 直观呈现给用户：工具返回值已提供预格式化的 `user_display_markdown`。你只需将下载链接与每页的截图预览直观列出给用户查看，大模型无需进行自主视觉审查；\n"
-        "4. 用户反馈与修改闭环：用户查看截图后，若满意可直接点击链接下载 PPTX 文件；若用户提出具体修改建议，大模型直接调用相应的修改接口：\n"
+        "3. 直观呈现给用户（输出强制铁律）：工具返回值中已提供精心排版的 `user_display_markdown`。在最终回复中，你【必须直接原样输出 user_display_markdown】！必须确保每一页的高清截图都以 Markdown 图片语法 `![第X页预览](url)` 直接渲染为大图展示。绝对严禁自作聪明将其转换为 `[标题](url)` 等纯文字超链接，绝对严禁因页数多而擅自省略或折叠图片！大模型无需进行自主视觉审查；\n"
+        "4. 用户反馈与修改闭环：用户在聊天界面直接查看到完整渲染的每页大图后，若满意可直接点击链接下载 PPTX 文件；若用户提出具体修改建议，大模型直接调用相应的修改接口：\n"
         "   - 单页精修：调用 `update_page(deck_id, page_number, page_spec)` 修改某页；\n"
         "   - 全局换肤：调用 `change_theme(deck_id, new_theme)` 一键切换全套配色风格；\n"
         "   - 增删页面：调用 `insert_page` 或 `delete_page` 动态增删页面；\n"
-        "   修改完成后同样将最新的下载链接与截图预览链接列给用户确认。"
+        "   修改完成后，同样必须直接原样输出返回值中的 `user_display_markdown`，以图片形式直观展示最新效果。"
     ),
 )
 
@@ -148,7 +148,7 @@ def make_display_markdown(download_url: str, filename: str, pages_info: list[dic
         layout = p.get("layout", "")
         url = p.get("preview_url", "")
         tag = f" `[{layout}]`" if layout else ""
-        lines.append(f"- **第 {idx} 页{tag} · {title}**\n  ![第 {idx} 页预览]({url})")
+        lines.append(f"- **第 {idx} 页{tag} · {title}**\n\n  ![第 {idx} 页预览]({url})")
     return "\n\n".join(lines)
 
 
@@ -399,7 +399,7 @@ def create_presentation(spec: dict, filename: str = "", preview: bool = True,
         preview_pages: 仅预览指定页（如 "1,3"），留空表示全部页面。
 
     Returns:
-        JSON 格式结果，包含 PPTX 下载链接 (download_url)、每页截图链接 (preview_urls) 以及方便大模型直接展示给用户的 Markdown 内容 (user_display_markdown)。
+        JSON 格式结果，包含 PPTX 下载链接 (download_url)、每页截图链接 (preview_urls) 以及已格式化排版的 Markdown 内容 (user_display_markdown)。大模型在最终回复中【必须直接原样输出 user_display_markdown】，以 Markdown 图片语法直接渲染所有页面的预览大图，严禁精简为纯文字超链接。
     """
     errs = _validate_spec(spec)
     if errs:
@@ -436,7 +436,11 @@ def create_presentation(spec: dict, filename: str = "", preview: bool = True,
         "preview_urls": [],
         "slides": [],
         "user_display_markdown": "",
-        "action_guide": "演示文稿已出片完成！请直接将 download_url 和 preview_urls（或 user_display_markdown）展示给用户看。用户查看截图后可直接下载或根据意愿要求调整某页，大模型无需进行自主视觉审查。"
+        "action_guide": (
+            "演示文稿已成功生成！【最终回复输出铁律】：请务必直接在最终回复中原样输出返回值中的 `user_display_markdown`！"
+            "必须确保每一页的高清预览图都以 Markdown 图片语法 `![第X页预览](url)` 直接渲染为大图展示，"
+            "绝对严禁将其简化为 `[标题](url)` 等纯文字超链接，绝对严禁因页数多而擅自省略图片！用户查看后若满意可直接下载，或提出修改意见。"
+        )
     }
 
     if not preview:
@@ -476,7 +480,8 @@ def create_presentation(spec: dict, filename: str = "", preview: bool = True,
                 "page": page_idx,
                 "title": page_meta.get("title", f"第 {page_idx} 页"),
                 "layout": page_meta.get("layout", "bullets"),
-                "preview_url": preview_urls[i]
+                "preview_url": preview_urls[i],
+                "markdown_image": f"![第 {page_idx} 页预览]({preview_urls[i]})"
             })
         result["slides"] = slides_info
         result["user_display_markdown"] = make_display_markdown(download_url, rec["name"], slides_info)
@@ -555,7 +560,10 @@ def update_page(deck_id: str, page_number: int, page_spec: dict) -> str:
         "page_preview_url": page_preview_url,
         "user_display_markdown": user_md,
         "warnings": warnings,
-        "action_guide": "请直接将 download_url 和 page_preview_url（或 user_display_markdown）展示给用户看。用户查看后若满意可直接下载，或提出进一步修改意见。"
+        "action_guide": (
+            "单页精修已完成！【最终回复输出铁律】：请务必直接在最终回复中原样输出返回值中的 `user_display_markdown`，"
+            "确保修改后的页面以 Markdown 图片语法 `![预览](url)` 直接渲染为大图展示给用户，绝对严禁写成纯文字超链接！"
+        )
     }
     return _json(result)
 
@@ -622,7 +630,8 @@ def change_theme(deck_id: str, new_theme: str) -> str:
                     "page": p_idx,
                     "title": p_meta.get("title", f"第 {p_idx} 页"),
                     "layout": p_meta.get("layout", "bullets"),
-                    "preview_url": preview_urls[i]
+                    "preview_url": preview_urls[i],
+                    "markdown_image": f"![第 {p_idx} 页预览]({preview_urls[i]})"
                 })
         except Exception:
             pass
@@ -639,7 +648,10 @@ def change_theme(deck_id: str, new_theme: str) -> str:
         "slides": slides_info,
         "user_display_markdown": user_md,
         "warnings": warnings,
-        "action_guide": "主题已成功切换！请直接将最新的 download_url 和 preview_urls 展示给用户看。"
+        "action_guide": (
+            "主题已成功切换！【最终回复输出铁律】：请务必直接在最终回复中原样输出返回值中的 `user_display_markdown`，"
+            "确保全套最新截图以 Markdown 图片语法 `![预览](url)` 直接渲染为大图展示，绝对严禁写成纯文字超链接！"
+        )
     }
     return _json(result)
 
@@ -709,7 +721,10 @@ def insert_page(deck_id: str, page_spec: dict, position: int = -1) -> str:
         "page_preview_url": page_preview_url,
         "user_display_markdown": user_md,
         "warnings": warnings,
-        "action_guide": "新页面已插入完毕！请直接将 download_url 和 page_preview_url 展示给用户看。"
+        "action_guide": (
+            "新页面已插入完毕！【最终回复输出铁律】：请务必直接在最终回复中原样输出返回值中的 `user_display_markdown`，"
+            "以 Markdown 图片语法 `![预览](url)` 直接渲染展示新页面大图与下载链接，绝对严禁写成纯文字超链接！"
+        )
     }
     return _json(result)
 
@@ -778,7 +793,7 @@ def delete_page(deck_id: str, page_number: int) -> str:
         "preview_urls": preview_urls,
         "user_display_markdown": user_md,
         "warnings": warnings,
-        "action_guide": "页面已成功删除！请直接将最新的 download_url 展示给用户看。"
+        "action_guide": "页面已成功删除！请务必直接在最终回复中原样输出返回值中的 `user_display_markdown` 与最新下载链接。"
     }
     return _json(result)
 
@@ -808,7 +823,7 @@ def render_preview(deck_id: str, pages: str = "", dpi: int = 110) -> str:
 
     md_lines = ["#### 🖼️ 幻灯片逐页截图预览："]
     for i, u in enumerate(preview_urls):
-        md_lines.append(f"- **第 {i+1} 页**\n  ![第 {i+1} 页预览]({u})")
+        md_lines.append(f"- **第 {i+1} 页**\n\n  ![第 {i+1} 页预览]({u})")
 
     out_json = {
         "ok": True,
@@ -816,7 +831,10 @@ def render_preview(deck_id: str, pages: str = "", dpi: int = 110) -> str:
         "count": len(pngs),
         "preview_urls": preview_urls,
         "user_display_markdown": "\n\n".join(md_lines),
-        "action_guide": "预览图渲染完成，请将 preview_urls 或 user_display_markdown 展示给用户。"
+        "action_guide": (
+            "预览图渲染完成！【最终回复输出铁律】：请务必在最终回复中直接原样输出 `user_display_markdown`，"
+            "确保每页截图以 Markdown 图片语法 `![预览](url)` 直接渲染为图片展示给用户看，绝对严禁输出为纯文字超链接！"
+        )
     }
     return _json(out_json)
 

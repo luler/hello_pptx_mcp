@@ -742,97 +742,175 @@ def poetry_card(cv, y, poem_lines, title=None, author=None, interpretation=None,
 
 
 def topology_diagram(cv, y, nodes, edges=None, h=4.3):
-    """现代分布式拓扑架构图（Topology Diagram）：节点方阵 + 有向调用箭头。"""
+    """现代分布式拓扑架构图（Topology Diagram）：节点方阵 + 全向调用流转指引。"""
     pal = cv.pal
     if not nodes:
         return y
     accents = pal.get("accents") or [pal.get("accent", pal["primary"])]
 
-    # 外层大架构底盘卡片
+    # 外层大架构底盘卡片（悬浮质感）
     cv.card(MARGIN, y, CONTENT_W, h, fill=pal.get("card_bg"),
             line=pal.get("card_border"), lw=0.75, radius=0.08)
 
-    # 确定网格列数与行数
-    max_c = max(int(n.get("col", 0)) for n in nodes) + 1
-    max_r = max(int(n.get("row", 0)) for n in nodes) + 1
-    cols = max(2, min(max_c, 5))
-    rows = max(1, min(max_r, 4))
+    # 1. 智能行列分析与 0-based 归一化（自适应 0 起始或 1 起始）
+    has_grid = any("col" in n and "row" in n for n in nodes)
+    if has_grid:
+        raw_cols = [int(n.get("col", 0)) for n in nodes]
+        raw_rows = [int(n.get("row", 0)) for n in nodes]
+        min_c = min(raw_cols)
+        min_r = min(raw_rows)
+        cols = max(raw_cols) - min_c + 1
+        rows = max(raw_rows) - min_r + 1
+    else:
+        n_count = len(nodes)
+        cols = 3 if n_count <= 6 else (4 if n_count <= 8 else 3)
+        rows = (n_count + cols - 1) // cols
+        min_c, min_r = 0, 0
 
-    pad_x = 0.50
-    pad_y = 0.40
-    avail_w = CONTENT_W - pad_x * 2
-    avail_h = h - pad_y * 2
-    gap_x = 0.60
-    gap_y = 0.45
-    node_w = (avail_w - gap_x * (cols - 1)) / float(cols)
-    node_h = (avail_h - gap_y * (rows - 1)) / float(rows)
+    cols = max(1, min(cols, 5))
+    rows = max(1, min(rows, 4))
+
+    # 2. 动态计算节点尺寸与全局居中 Padding
+    gap_x = 0.80 if cols <= 3 else 0.50
+    gap_y = 0.60 if rows <= 2 else 0.40
+
+    avail_w = CONTENT_W - 0.70
+    avail_h = h - 0.60
+    node_w = min(3.40, (avail_w - gap_x * (cols - 1)) / float(cols))
+    node_h = min(1.60, (avail_h - gap_y * (rows - 1)) / float(rows))
+
+    total_w = cols * node_w + (cols - 1) * gap_x
+    total_h = rows * node_h + (rows - 1) * gap_y
+    pad_x = (CONTENT_W - total_w) / 2.0
+    pad_y = (h - total_h) / 2.0
 
     node_pos = {}
     for i, n in enumerate(nodes):
-        nid = n.get("id") or str(i)
-        ci = int(n.get("col", i % cols))
-        ri = int(n.get("row", i // cols))
-        ci = min(ci, cols - 1)
-        ri = min(ri, rows - 1)
+        if has_grid and "col" in n and "row" in n:
+            ci = int(n["col"]) - min_c
+            ri = int(n["row"]) - min_r
+        else:
+            ci = i % cols
+            ri = i // cols
+        ci = max(0, min(ci, cols - 1))
+        ri = max(0, min(ri, rows - 1))
 
         nx = MARGIN + pad_x + ci * (node_w + gap_x)
         ny = y + pad_y + ri * (node_h + gap_y)
-        node_pos[nid] = (nx, ny, node_w, node_h, ci, ri)
+
+        info = (nx, ny, node_w, node_h, ci, ri)
+        # 建立多别名键映射，确保 edges 通过 id, label, title 或索引均可命中
+        for k in ("id", "label", "title", "name"):
+            val = n.get(k)
+            if val is not None:
+                node_pos[str(val).strip()] = info
+        node_pos[str(i)] = info
+        node_pos[f"node_{i}"] = info
+        node_pos[f"node_{i+1}"] = info
+
         node_acc = n.get("color") or accents[i % len(accents)]
 
-        # 节点卡片
+        # 节点卡片：圆润边角与强调外框
         cv.card(nx, ny, node_w, node_h, fill=pal.get("card_subtle"),
-                line=node_acc, lw=0.8, radius=0.06)
+                line=node_acc, lw=0.9, radius=0.06)
 
-        # 顶部微光发光条
-        cv.pill(nx + 0.14, ny + 0.04, min(1.0, node_w - 0.28), 0.03, fill=node_acc)
+        # 顶部微光发光饰条
+        cv.pill(nx + 0.14, ny + 0.04, min(1.2, node_w - 0.28), 0.035, fill=node_acc)
 
-        # 节点标签胶囊（如 [网关]、[核心]、[存储]、[队列]）
-        tag_str = n.get("tag") or n.get("type") or "NODE"
-        cv.badge(nx + 0.14, ny + 0.14, str(tag_str), dot=True,
+        # 节点类型标签胶囊（如 [DB]、[SERVICE]、[CACHE]、[APP]）
+        tag_str = str(n.get("tag") or n.get("type") or "NODE").upper()
+        cv.badge(nx + 0.14, ny + 0.14, tag_str, dot=True,
                  dot_color=node_acc, text_color=node_acc, size=8.5, h=0.24, pad_x=0.08)
 
-        # 节点标题
-        title_str = str(n.get("label") or n.get("title") or nid)
-        cv.text(nx + 0.14, ny + 0.42, node_w - 0.28, 0.30, title_str,
+        # 节点核心标题
+        title_str = str(n.get("label") or n.get("title") or n.get("id") or f"节点 {i+1}")
+        cv.text(nx + 0.14, ny + 0.44, node_w - 0.28, 0.32, title_str,
                 size=11.5, bold=True, color=pal.get("text_title", pal["primary"]), line=1.05)
 
-        # 节点副文本/说明
+        # 节点技术说明 / 描述
         desc_str = n.get("desc") or n.get("sub")
-        if desc_str and node_h >= 1.10:
-            cv.text(nx + 0.14, ny + 0.74, node_w - 0.28, node_h - 0.82, str(desc_str),
-                    size=9.2, color=pal.get("text_muted"), line=1.15)
+        if desc_str and node_h >= 0.95:
+            cv.text(nx + 0.14, ny + 0.82, node_w - 0.28, node_h - 0.90, str(desc_str),
+                    size=9.2, color=pal.get("text_muted"), line=1.18)
 
-    # 绘制连线/拓扑调用关系
+    # 绘制全向有向拓扑边与调用流转标签
     if edges:
         for ed in edges:
-            f_id = ed.get("from")
-            t_id = ed.get("to")
-            if f_id in node_pos and t_id in node_pos:
-                fx, fy, fw, fh, fc, fr = node_pos[f_id]
-                tx, ty, tw, th, tc, tr = node_pos[t_id]
-                elbl = ed.get("label") or ""
+            f_key = str(ed.get("from") or "").strip()
+            t_key = str(ed.get("to") or "").strip()
+            if f_key in node_pos and t_key in node_pos:
+                fx, fy, fw, fh, fc, fr = node_pos[f_key]
+                tx, ty, tw, th, tc, tr = node_pos[t_key]
+                elbl = str(ed.get("label") or "").strip()
 
-                # 同行从左至右
+                elbl_chars = sum(0.15 if ord(c) > 127 else 0.085 for c in elbl)
+
+                # 1. 同行从左至右
                 if fr == tr and fc < tc:
-                    arr_x = fx + fw
-                    arr_y = fy + fh / 2.0 - 0.10
-                    arr_w = tx - arr_x
-                    cv.pill(arr_x + 0.05, arr_y, arr_w - 0.10, 0.22,
-                            fill=pal.get("badge_bg"), line=None)
-                    tf_e = cv.tbox(arr_x + 0.05, arr_y, arr_w - 0.10, 0.22, anchor=MSO_ANCHOR.MIDDLE)
-                    arrow_text = ("%s ➔" % elbl) if elbl else "➔"
+                    span_w = tx - (fx + fw)
+                    arr_w = max(0.90, min(span_w - 0.06, elbl_chars + 0.52))
+                    arr_x = fx + fw + (span_w - arr_w) / 2.0
+                    arr_y = fy + fh / 2.0 - 0.13
+                    cv.pill(arr_x, arr_y, arr_w, 0.26,
+                            fill=pal.get("badge_bg"), line=pal.get("card_border"))
+                    tf_e = cv.tbox(arr_x, arr_y, arr_w, 0.26, anchor=MSO_ANCHOR.MIDDLE)
+                    arrow_text = f"{elbl} ➔" if elbl else "➔"
                     cv.para(tf_e, arrow_text, size=8.5, bold=True,
                             color=pal.get("accent"), align="center", first=True)
-                # 同列从上至下
+
+                # 2. 同行从右至左
+                elif fr == tr and fc > tc:
+                    span_w = fx - (tx + tw)
+                    arr_w = max(0.90, min(span_w - 0.06, elbl_chars + 0.52))
+                    arr_x = tx + tw + (span_w - arr_w) / 2.0
+                    arr_y = fy + fh / 2.0 - 0.13
+                    cv.pill(arr_x, arr_y, arr_w, 0.26,
+                            fill=pal.get("badge_bg"), line=pal.get("card_border"))
+                    tf_e = cv.tbox(arr_x, arr_y, arr_w, 0.26, anchor=MSO_ANCHOR.MIDDLE)
+                    arrow_text = f"◀ {elbl}" if elbl else "◀"
+                    cv.para(tf_e, arrow_text, size=8.5, bold=True,
+                            color=pal.get("accent"), align="center", first=True)
+
+                # 3. 同列从上至下
                 elif fc == tc and fr < tr:
-                    arr_x = fx + fw / 2.0 - 0.35
-                    arr_y = fy + fh
-                    arr_h = ty - arr_y
-                    cv.pill(arr_x, arr_y + 0.05, 0.70, arr_h - 0.10,
-                            fill=pal.get("badge_bg"), line=None)
-                    tf_e = cv.tbox(arr_x, arr_y + 0.05, 0.70, arr_h - 0.10, anchor=MSO_ANCHOR.MIDDLE)
-                    arrow_text = ("%s ▼" % elbl) if elbl else "▼"
+                    span_h = ty - (fy + fh)
+                    arr_h = max(0.24, min(span_h - 0.08, 0.32))
+                    arr_w = max(1.00, min(node_w - 0.30, elbl_chars + 0.50))
+                    arr_x = fx + (fw - arr_w) / 2.0
+                    arr_y = fy + fh + (span_h - arr_h) / 2.0
+                    cv.pill(arr_x, arr_y, arr_w, arr_h,
+                            fill=pal.get("badge_bg"), line=pal.get("card_border"))
+                    tf_e = cv.tbox(arr_x, arr_y, arr_w, arr_h, anchor=MSO_ANCHOR.MIDDLE)
+                    arrow_text = f"{elbl} ▼" if elbl else "▼"
+                    cv.para(tf_e, arrow_text, size=8.5, bold=True,
+                            color=pal.get("accent"), align="center", first=True)
+
+                # 4. 同列从下至上
+                elif fc == tc and fr > tr:
+                    span_h = fy - (ty + th)
+                    arr_h = max(0.24, min(span_h - 0.08, 0.32))
+                    arr_w = max(1.00, min(node_w - 0.30, elbl_chars + 0.50))
+                    arr_x = fx + (fw - arr_w) / 2.0
+                    arr_y = ty + th + (span_h - arr_h) / 2.0
+                    cv.pill(arr_x, arr_y, arr_w, arr_h,
+                            fill=pal.get("badge_bg"), line=pal.get("card_border"))
+                    tf_e = cv.tbox(arr_x, arr_y, arr_w, arr_h, anchor=MSO_ANCHOR.MIDDLE)
+                    arrow_text = f"{elbl} ▲" if elbl else "▲"
+                    cv.para(tf_e, arrow_text, size=8.5, bold=True,
+                            color=pal.get("accent"), align="center", first=True)
+
+                # 5. 跨层跨列流转（如右上至左下，或上排节点下沉至下排其它列）
+                else:
+                    cx1 = fx + fw / 2.0
+                    cx2 = tx + tw / 2.0
+                    arr_w = max(1.20, min(2.40, elbl_chars + 0.58))
+                    mid_x = (cx1 + cx2) / 2.0 - arr_w / 2.0
+                    mid_y = (fy + fh + ty) / 2.0 - 0.13
+                    cv.pill(mid_x, mid_y, arr_w, 0.26,
+                            fill=pal.get("badge_bg"), line=pal.get("card_border"))
+                    tf_e = cv.tbox(mid_x, mid_y, arr_w, 0.26, anchor=MSO_ANCHOR.MIDDLE)
+                    sym = "↙" if tc < fc else "↘"
+                    arrow_text = f"{elbl} {sym}" if elbl else sym
                     cv.para(tf_e, arrow_text, size=8.5, bold=True,
                             color=pal.get("accent"), align="center", first=True)
 
@@ -1000,17 +1078,9 @@ def swot_matrix(cv, y, swot_data, h=4.8):
         tf = cv.tbox(qx + 0.20, qy + 0.58, quad_w - 0.40, quad_h - 0.68)
         for j, it in enumerate(items_list[:4]):
             it_text = it if isinstance(it, str) else it.get("text", "")
-            p = cv.para(tf, "▪ ", size=9.5, bold=True, color=col,
-                        first=(j == 0), before=4 if j > 0 else 0)
-            for run_t, run_opt in parse_rich(it_text, color=col):
-                r = p.add_run()
-                r.text = run_t
-                if run_opt.get("b"):
-                    r.font.bold = True
-                if run_opt.get("c"):
-                    r.font.color.rgb = run_opt["c"]
-                r.font.size = Pt(9.5)
-                r.font.name = cv.font_cjk
+            runs = [("▪ ", {"b": True, "c": col, "sz": 9.5})] + parse_rich(it_text, color=col)
+            cv.para(tf, runs, size=9.5, color=pal.get("text_body"),
+                    first=(j == 0), before=4 if j > 0 else 0)
 
     return y + h
 
@@ -1058,16 +1128,9 @@ def roadmap_milestones(cv, y, phases, h=4.8):
         tf_tasks = cv.tbox(px + 0.16, y + 1.76, pw - 0.32, h - 1.90)
         for j, t in enumerate(tasks[:5]):
             t_text = t if isinstance(t, str) else t.get("text", "")
-            p = cv.para(tf_tasks, "✔ ", size=9.2, bold=True, color=acc, first=(j == 0), before=4 if j > 0 else 0)
-            for rt, ro in parse_rich(t_text, color=acc):
-                r = p.add_run()
-                r.text = rt
-                if ro.get("b"):
-                    r.font.bold = True
-                if ro.get("c"):
-                    r.font.color.rgb = ro["c"]
-                r.font.size = Pt(9.2)
-                r.font.name = cv.font_cjk
+            runs = [("✔ ", {"b": True, "c": acc, "sz": 9.2})] + parse_rich(t_text, color=acc)
+            cv.para(tf_tasks, runs, size=9.2, color=pal.get("text_body"),
+                    first=(j == 0), before=4 if j > 0 else 0)
 
         # 卡片之间箭头指示流转推进
         if i < n - 1:
@@ -1091,45 +1154,29 @@ def pros_cons(cv, y, pros_data, cons_data, takeaway=None, h=4.8):
     # 1. 左侧优势卡片 (Pros)
     cv.card(MARGIN, y, half_w, main_h)
     cv.rect(MARGIN, y, half_w, 0.05, fill=acc_pros)
-    cv.badge(MARGIN + 0.20, y + 0.20, "＋ 方案核心优势与超额收益 (PROS)", dot=True,
+    cv.badge(MARGIN + 0.20, y + 0.20, "＋ 方案核心优势与超额收益 (PROS)", dot=False,
              dot_color=acc_pros, text_color=acc_pros, size=10, h=0.32, pad_x=0.14)
 
     pros_items = pros_data if isinstance(pros_data, list) else (pros_data.get("items") or [pros_data])
     tf_p = cv.tbox(MARGIN + 0.22, y + 0.65, half_w - 0.44, main_h - 0.85)
     for j, it in enumerate(pros_items[:5]):
         t = it if isinstance(it, str) else it.get("text", "")
-        p = cv.para(tf_p, "✔  ", size=9.8, bold=True, color=acc_pros, first=(j == 0), before=6 if j > 0 else 0)
-        for rt, ro in parse_rich(t, color=acc_pros):
-            r = p.add_run()
-            r.text = rt
-            if ro.get("b"):
-                r.font.bold = True
-            if ro.get("c"):
-                r.font.color.rgb = ro["c"]
-            r.font.size = Pt(9.8)
-            r.font.name = cv.font_cjk
+        runs = [("✔  ", {"b": True, "c": acc_pros, "sz": 9.8})] + parse_rich(t, color=acc_pros)
+        cv.para(tf_p, runs, size=9.8, color=pal.get("text_body"), first=(j == 0), before=6 if j > 0 else 0)
 
     # 2. 右侧弊端/挑战卡片 (Cons)
     rx = MARGIN + half_w + 0.28
     cv.card(rx, y, half_w, main_h)
     cv.rect(rx, y, half_w, 0.05, fill=acc_cons)
-    cv.badge(rx + 0.20, y + 0.20, "▲ 潜在风险与约束考量 (CONS)", dot=True,
+    cv.badge(rx + 0.20, y + 0.20, "▲ 潜在风险与约束考量 (CONS)", dot=False,
              dot_color=acc_cons, text_color=acc_cons, size=10, h=0.32, pad_x=0.14)
 
     cons_items = cons_data if isinstance(cons_data, list) else (cons_data.get("items") or [cons_data])
     tf_c = cv.tbox(rx + 0.22, y + 0.65, half_w - 0.44, main_h - 0.85)
     for j, it in enumerate(cons_items[:5]):
         t = it if isinstance(it, str) else it.get("text", "")
-        p = cv.para(tf_c, "▲  ", size=9.8, bold=True, color=acc_cons, first=(j == 0), before=6 if j > 0 else 0)
-        for rt, ro in parse_rich(t, color=acc_cons):
-            r = p.add_run()
-            r.text = rt
-            if ro.get("b"):
-                r.font.bold = True
-            if ro.get("c"):
-                r.font.color.rgb = ro["c"]
-            r.font.size = Pt(9.8)
-            r.font.name = cv.font_cjk
+        runs = [("▲  ", {"b": True, "c": acc_cons, "sz": 9.8})] + parse_rich(t, color=acc_cons)
+        cv.para(tf_c, runs, size=9.8, color=pal.get("text_body"), first=(j == 0), before=6 if j > 0 else 0)
 
     # 3. 底部权衡决策卡
     if has_takeaway:
@@ -1278,12 +1325,10 @@ def pricing_packages(cv, y, packages, h=4.8):
         price = str(p.get("price") or "¥ 9,800")
         period = str(p.get("period") or p.get("unit") or "/ 年")
         tf_pr = cv.tbox(px + 0.10, y + 0.72, pw - 0.20, 0.55, anchor=MSO_ANCHOR.MIDDLE)
-        pr_p = cv.para(tf_pr, price, size=20, bold=True, color=acc_card, align="center", first=True)
-        r_per = pr_p.add_run()
-        r_per.text = f" {period}"
-        r_per.font.size = Pt(10)
-        r_per.font.color.rgb = pal.get("text_muted")
-        r_per.font.name = cv.font_cjk
+        cv.para(tf_pr, [
+            (price, {"sz": 20, "b": True, "c": acc_card}),
+            (f" {period}", {"sz": 10, "c": pal.get("text_muted")}),
+        ], align="center", first=True)
 
         desc = p.get("desc") or ""
         if desc:
@@ -1295,12 +1340,8 @@ def pricing_packages(cv, y, packages, h=4.8):
         features = p.get("features") or p.get("items") or []
         tf_f = cv.tbox(px + 0.20, y + 1.85, pw - 0.40, h - 2.50)
         for j, feat in enumerate(features[:6]):
-            p_f = cv.para(tf_f, "✔ ", size=9.5, bold=True, color=acc_card, first=(j == 0), before=4 if j > 0 else 0)
-            r_ft = p_f.add_run()
-            r_ft.text = str(feat)
-            r_ft.font.size = Pt(9.5)
-            r_ft.font.color.rgb = pal.get("text_body")
-            r_ft.font.name = cv.font_cjk
+            runs = [("✔ ", {"b": True, "c": acc_card, "sz": 9.5})] + parse_rich(str(feat), color=acc_card)
+            cv.para(tf_f, runs, size=9.5, color=pal.get("text_body"), first=(j == 0), before=4 if j > 0 else 0)
 
         cta_text = str(p.get("cta") or "立即开通体验")
         cta_y = y + h - 0.52
@@ -1325,27 +1366,19 @@ def summary_next_steps(cv, y, summary_data, h=4.8):
     # 左侧：核心汇报结论沉淀 (Key Takeaways)
     cv.card(MARGIN, y, left_w, h)
     cv.rect(MARGIN, y, left_w, 0.045, fill=acc)
-    cv.badge(MARGIN + 0.20, y + 0.20, "★ 战略核心结论沉淀", dot=True, size=10, h=0.30)
+    cv.badge(MARGIN + 0.20, y + 0.20, "★ 战略核心结论沉淀", dot=False, size=10, h=0.30)
 
     takeaways = summary_data.get("takeaways") or summary_data.get("conclusions") or []
     if isinstance(takeaways, str):
         takeaways = [takeaways]
     tf_tk = cv.tbox(MARGIN + 0.20, y + 0.65, left_w - 0.40, h - 0.85)
     for j, tk in enumerate(takeaways[:4]):
-        p_tk = cv.para(tf_tk, f"0{j+1} · ", size=10.5, bold=True, color=acc, first=(j == 0), before=8 if j > 0 else 0)
-        for rt, ro in parse_rich(str(tk), color=acc):
-            r = p_tk.add_run()
-            r.text = rt
-            if ro.get("b"):
-                r.font.bold = True
-            if ro.get("c"):
-                r.font.color.rgb = ro["c"]
-            r.font.size = Pt(10)
-            r.font.name = cv.font_cjk
+        runs = [(f"0{j+1} · ", {"b": True, "c": acc, "sz": 10.5})] + parse_rich(str(tk), color=acc)
+        cv.para(tf_tk, runs, size=10, color=pal.get("text_body"), first=(j == 0), before=8 if j > 0 else 0)
 
     # 右侧：下一步行动方案卡片 (Action Plan)
     cv.card(right_x, y, right_w, h)
-    cv.badge(right_x + 0.20, y + 0.20, "● 下一步落地行动计划 (Next Steps)", dot=False, size=10, h=0.30)
+    cv.badge(right_x + 0.20, y + 0.20, "下一步落地行动计划 (Next Steps)", dot=True, size=10, h=0.30)
 
     actions = summary_data.get("actions") or summary_data.get("next_steps") or []
     act_count = max(1, min(len(actions), 4))
@@ -1360,10 +1393,10 @@ def summary_next_steps(cv, y, summary_data, h=4.8):
         due_str = str(act.get("due") or act.get("deadline") or "近期交付")
 
         tf_act = cv.tbox(right_x + 0.30, ay + 0.10, right_w - 2.4, act_h - 0.20, anchor=MSO_ANCHOR.MIDDLE)
-        cv.para(tf_act, task_str, size=10.5, bold=True, color=pal.get("text_title", pal["primary"]), first=True)
+        cv.para(tf_act, parse_rich(task_str, color=acc), size=10.5, bold=True, color=pal.get("text_title", pal["primary"]), first=True)
         desc_str = act.get("desc") or ""
         if desc_str:
-            cv.para(tf_act, desc_str, size=8.5, color=pal.get("text_subtitle", pal["text_body"]), before=2)
+            cv.para(tf_act, parse_rich(desc_str, color=acc), size=8.5, color=pal.get("text_subtitle", pal["text_body"]), before=2)
 
         tf_meta = cv.tbox(right_x + right_w - 2.10, ay + 0.10, 1.80, act_h - 0.20, anchor=MSO_ANCHOR.MIDDLE)
         cv.para(tf_meta, owner_str, size=9.5, bold=True, color=acc, align="right", first=True)
