@@ -63,6 +63,15 @@ app = FastAPI(
 )
 
 
+try:
+    from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
+    # 彻底放行所有域名、反向代理与 Origin，彻底根治 421 Invalid Host header
+    TransportSecurityMiddleware._validate_host = lambda self, host: True
+    TransportSecurityMiddleware._validate_origin = lambda self, origin: True
+except Exception:
+    pass
+
+
 class BaseUrlMiddleware:
     """纯 ASGI 中间件：提取 HTTP 客户端真实请求的协议与 Host 头，注入上下文供 URL 动态拼接。"""
     def __init__(self, inner_app):
@@ -70,6 +79,9 @@ class BaseUrlMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
+            # 解决客户端请求 /mcp 时被 Starlette 307 重定向的问题（免去 307 跳转）
+            if scope.get("path") == "/mcp":
+                scope["path"] = "/mcp/"
             headers = dict(scope.get("headers", []))
             x_proto = headers.get(b"x-forwarded-proto", b"").decode("latin-1")
             proto = x_proto or scope.get("scheme", "http")
@@ -101,10 +113,15 @@ _mcp_app = M.server.streamable_http_app(streamable_http_path="/")
 # 确保在反向代理（如 Nginx）环境下，MCP 会话安全中间件关闭 DNS Rebinding 强校验，开放所有域名与来源
 try:
     _mgr = getattr(M.server, "session_manager", None) or getattr(M.server, "_session_manager", None)
-    if _mgr and hasattr(_mgr, "_security") and hasattr(_mgr._security, "settings"):
-        _mgr._security.settings.enable_dns_rebinding_protection = False
-        _mgr._security.settings.allowed_hosts = ["*"]
-        _mgr._security.settings.allowed_origins = ["*"]
+    if _mgr:
+        if hasattr(_mgr, "security_settings") and _mgr.security_settings:
+            _mgr.security_settings.enable_dns_rebinding_protection = False
+            _mgr.security_settings.allowed_hosts = ["*"]
+            _mgr.security_settings.allowed_origins = ["*"]
+        if hasattr(_mgr, "_security") and hasattr(_mgr._security, "settings"):
+            _mgr._security.settings.enable_dns_rebinding_protection = False
+            _mgr._security.settings.allowed_hosts = ["*"]
+            _mgr._security.settings.allowed_origins = ["*"]
 except Exception:
     pass
 

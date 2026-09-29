@@ -25,14 +25,16 @@ except ImportError:
         from mcp.server import FastMCP as MCPServer
 
 try:
-    from mcp.server.transport_security import TransportSecuritySettings
-    # 允许所有域名、IP 与地址访问：彻底关闭 DNS Rebinding 限制并通配 Host/Origin
+    from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
+    # 彻底放行所有域名、反向代理与 Origin，彻底根治 421 Invalid Host header
+    TransportSecurityMiddleware._validate_host = lambda self, host: True
+    TransportSecurityMiddleware._validate_origin = lambda self, origin: True
     _transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=False,
         allowed_hosts=["*"],
         allowed_origins=["*"],
     )
-except ImportError:
+except Exception:
     _transport_security = None
 
 from pptkit import render, store as store_mod, templates, theme as theme_mod
