@@ -100,7 +100,9 @@ def progress_bar(cv, x, y, w, h, ratio, fill=None, bg=None, label=None,
     pal = cv.pal
     ratio = max(0.0, min(1.0, float(ratio)))
     has_label = bool(label)
-    label_w = 0.75 if has_label else 0.0
+    label_str = str(label) if has_label else ""
+    # 动态根据数值文字字符数分配合适的右侧宽度，防止类似 409.6、100% 出现换行或拥挤
+    label_w = max(0.75, len(label_str) * 0.095 + 0.18) if has_label else 0.0
     track_w = max(0.5, w - label_w)
 
     track_bg = bg or pal.get("card_subtle", pal["bar_bg"])
@@ -109,13 +111,14 @@ def progress_bar(cv, x, y, w, h, ratio, fill=None, bg=None, label=None,
     # 轨道底色
     cv.pill(x, y, track_w, h, fill=track_bg)
 
-    # 填充进度条
-    if ratio > 0.02:
-        fill_w = max(h, track_w * ratio)
+    # 填充进度条：长度严格与 ratio 线性对应（数值越大色块越长）
+    if ratio > 0.001:
+        fill_w = max(h * 0.7, track_w * ratio)
         cv.pill(x, y, fill_w, h, fill=fill_col)
 
     # 标签数值
     if has_label:
-        cv.text(x + track_w + 0.10, y - 0.04, label_w, h + 0.08, str(label),
+        cv.text(x + track_w + 0.08, y - 0.04, label_w, h + 0.08, label_str,
                 size=label_size, bold=True, color=fill_col,
                 anchor=MSO_ANCHOR.MIDDLE)
+

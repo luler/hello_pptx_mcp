@@ -65,7 +65,7 @@ def header(cv, title, subtitle=None, category=None, y=0.38, size=23):
     """现代化幻灯片主页眉系统。"""
     pal = cv.pal
     title_col = pal.get("text_title", pal["primary"])
-    sub_col = pal.get("text_subtitle", pal["text_light"])
+    sub_col = pal.get("text_subtitle", pal["text_body"])
 
     # 1. 主标题
     cv.text(MARGIN, y, 7.8, 0.52, str(title or ""), size=size, bold=True,
@@ -174,7 +174,7 @@ def kpi_row(cv, cards, y=1.92, h=1.50, gap=0.20, cols=None):
             for j, line in enumerate(caps[:3]):
                 cv.para(tf, parse_rich(line, color=card_accent),
                         size=9.5 if h <= 1.8 else 10.5,
-                        color=pal.get("text_muted", pal["text_light"]),
+                        color=pal.get("text_body", pal.get("text_subtitle")),
                         line=1.20, first=(j == 0))
         else:
             # 无副文本时，数值居中放大显示，底边放置强调胶囊
@@ -210,7 +210,7 @@ def panel(cv, x, y, w, h, title, subtitle=None, accent_color=None):
     body_y = y + 0.54
     if subtitle:
         cv.text(x + 0.24, body_y, w - 0.48, 0.24, str(subtitle),
-                size=9.8, color=pal.get("text_muted", pal["text_light"]), line=1.1)
+                size=9.8, color=pal.get("text_subtitle", pal["text_body"]), line=1.1)
         body_y += 0.26
 
     # 细微分割线
@@ -248,7 +248,7 @@ def bullet_list(cv, x, y, w, h, items, size=11, gap=7, line=1.28, dot_color=None
         clean_text = format_item_text(it)
         runs = parse_rich(clean_text, color=dot_color or cv.pal.get("accent"))
         cv.bullet(tf, runs, first=(i == 0), size=size,
-                  before=(0 if i == 0 else gap), line=line)
+                  before=(0 if i == 0 else gap), line=line, dot=dot_color)
     return tf
 
 
@@ -406,7 +406,7 @@ def architecture_stack(cv, y, layers, h=4.3):
         desc_str = lyr.get("desc")
         if desc_str:
             cv.text(MARGIN + 0.30, ly + 0.54, 5.2, layer_h - 0.62, str(desc_str),
-                    size=10, color=pal.get("text_muted", pal["text_light"]), line=1.2)
+                    size=10, color=pal.get("text_body", pal["text"]), line=1.2)
 
         # 右侧技术组件胶囊阵列（Components Pills）
         comps = lyr.get("components") or lyr.get("items") or lyr.get("chips") or []
@@ -953,7 +953,7 @@ def pyramid_funnel(cv, y, tiers, h=4.8):
         cv.para(tf_main, title, size=12, bold=True, color=pal.get("text_title", pal["primary"]), first=True)
         desc = t.get("desc") or t.get("subtitle") or ""
         if desc:
-            cv.para(tf_main, parse_rich(desc, color=acc), size=9.2, color=pal.get("text_muted"), before=2)
+            cv.para(tf_main, parse_rich(desc, color=acc), size=9.2, color=pal.get("text_body", pal["text"]), before=2)
 
         # 右侧核心指标/占比（若有）
         if rate:
@@ -1048,7 +1048,7 @@ def roadmap_milestones(cv, y, phases, h=4.8):
         goal = ph.get("goal") or ph.get("desc") or ""
         if goal:
             cv.text(px + 0.16, y + 1.08, pw - 0.32, 0.50, goal,
-                    size=9, color=pal.get("text_muted"), line=1.2)
+                    size=9, color=pal.get("text_body", pal["text"]), line=1.2)
 
         # 分割线
         cv.divider(px + 0.16, y + 1.66, pw - 0.32)
@@ -1288,7 +1288,7 @@ def pricing_packages(cv, y, packages, h=4.8):
         desc = p.get("desc") or ""
         if desc:
             cv.text(px + 0.15, y + 1.30, pw - 0.30, 0.36, desc,
-                    size=9, color=pal.get("text_muted"), align="center", line=1.1)
+                    size=9, color=pal.get("text_body", pal["text"]), align="center", line=1.1)
 
         cv.divider(px + 0.20, y + 1.72, pw - 0.40)
 
@@ -1363,11 +1363,11 @@ def summary_next_steps(cv, y, summary_data, h=4.8):
         cv.para(tf_act, task_str, size=10.5, bold=True, color=pal.get("text_title", pal["primary"]), first=True)
         desc_str = act.get("desc") or ""
         if desc_str:
-            cv.para(tf_act, desc_str, size=8.5, color=pal.get("text_muted"), before=2)
+            cv.para(tf_act, desc_str, size=8.5, color=pal.get("text_subtitle", pal["text_body"]), before=2)
 
         tf_meta = cv.tbox(right_x + right_w - 2.10, ay + 0.10, 1.80, act_h - 0.20, anchor=MSO_ANCHOR.MIDDLE)
         cv.para(tf_meta, owner_str, size=9.5, bold=True, color=acc, align="right", first=True)
-        cv.para(tf_meta, due_str, size=8.5, color=pal.get("text_muted"), align="right", before=2)
+        cv.para(tf_meta, due_str, size=8.5, color=pal.get("text_subtitle", pal["text_body"]), align="right", before=2)
 
     return y + h
 

@@ -89,7 +89,7 @@ class Deck:
             py = self.sh - 0.44
             cv.badge(px, py, text, dot=False,
                      bg=self.pal.get("badge_bg"),
-                     text_color=self.pal.get("text_muted"),
+                     text_color=self.pal.get("badge_text", self.pal.get("text_subtitle")),
                      size=8.5, h=0.25, pad_x=0.10)
 
     # ---------------- 核心版式渲染器 ----------------
@@ -285,11 +285,52 @@ class Deck:
                         if is_all_metrics and len(items) <= 5:
                             from .charts import progress_bar
                             item_space_h = (ph - (by - y) - 0.20) / float(len(items))
+
+                            # 严格提取数值并计算最大基准，确保色块长度与数值严格对应（数值越大色块越长）
+                            vals = []
+                            for it in items:
+                                v = it.get("value")
+                                if isinstance(v, (int, float)):
+                                    vals.append(float(v))
+                                elif isinstance(v, str):
+                                    v_clean = v.replace("%", "").strip()
+                                    try:
+                                        vals.append(float(v_clean))
+                                    except ValueError:
+                                        pass
+
+                            panel_max = p.get("max") or p.get("max_value")
+                            if panel_max is not None:
+                                base_max = float(panel_max)
+                            elif vals:
+                                max_v = max(vals)
+                                title_str = (p.get("title") or "") + (p.get("subtitle") or "")
+                                is_explicit_pct = ("%" in title_str or "占比" in title_str or "比例" in title_str or "率" in title_str)
+                                sum_v = sum(vals)
+                                is_sum_100 = (95 <= sum_v <= 105)
+
+                                if (is_explicit_pct or is_sum_100) and max_v <= 100:
+                                    base_max = 100.0
+                                elif max_v <= 1.0:
+                                    base_max = 1.0
+                                else:
+                                    # 绝对性能/指标数值（如 80、120、200、409.6），以最大值为 100% 满条基准，色块长度严格对应数值大小！
+                                    base_max = max_v if max_v > 0 else 1.0
+                            else:
+                                base_max = 1.0
+
                             for j, it in enumerate(items):
                                 iy = by + j * item_space_h
                                 it_val = it["value"]
-                                it_ratio = float(it_val) if (isinstance(it_val, (int, float)) and it_val <= 1.0) else (float(it_val) / 100.0 if isinstance(it_val, (int, float)) and it_val <= 100 else 0.5)
-                                it_label = ("%.0f%%" % (it_val * 100)) if (isinstance(it_val, float) and it_val <= 1.0) else str(it_val)
+                                num_val = float(it_val) if isinstance(it_val, (int, float)) else (
+                                    float(str(it_val).replace("%", "").strip()) if str(it_val).replace("%", "").strip().replace(".", "", 1).isdigit() else 0.0
+                                )
+                                it_ratio = max(0.04, min(1.0, num_val / base_max)) if base_max > 0 else 0.5
+                                if isinstance(it_val, float) and it_val <= 1.0 and base_max == 1.0:
+                                    it_label = "%.0f%%" % (it_val * 100)
+                                else:
+                                    it_label = str(it_val)
+
                                 cv.text(bx, iy, bw, 0.22, str(it["label"]), size=10, bold=True,
                                         color=pal.get("text_title", pal["primary"]))
                                 item_acc = accents[j % len(accents)]
@@ -300,8 +341,14 @@ class Deck:
                                           size=p.get("size", 10.8), dot_color=panel_acc)
                     if p.get("progress") is not None:
                         from .charts import progress_bar
+                        prog_val = p["progress"]
+                        if isinstance(prog_val, (int, float)):
+                            prog_ratio = float(prog_val) if prog_val <= 1.0 else (float(prog_val) / 100.0 if prog_val <= 100 else 1.0)
+                        else:
+                            prog_ratio = 0.5
+                        prog_lbl = p.get("progress_label") or ("%.0f%%" % (prog_ratio * 100))
                         progress_bar(cv, bx, by + 0.25, bw, 0.16,
-                                     p["progress"], fill=panel_acc, label=p.get("progress_label"))
+                                     prog_ratio, fill=panel_acc, label=prog_lbl)
 
         if page.get("footer"):
             L.footer_note(cv, sh, page["footer"])

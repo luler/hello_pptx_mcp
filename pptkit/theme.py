@@ -74,21 +74,21 @@ PALETTES = {
         "primary_tint": "11284A",      # 极光暗蓝底
         "accent": "00F0FF",            # 赛博荧光青（核心数据吸睛爆发力）
         "accent_tint": "0E384D",
-        "accent2": "F59E0B",           # 亮琥珀橙（辅助告警/对比）
+        "accent2": "FBBF24",           # 亮琥珀金橙（高对比度）
         "text_title": "FFFFFF",        # 纯白大标题，极致通透
-        "text_subtitle": "94A3B8",     # 冷银灰次标题
-        "text_body": "CBD5E1",         # 清晰易读冷白正文
-        "text_muted": "64748B",        # 低对比度注脚
-        "badge_bg": "193153",          # 科技胶囊背景
+        "text_subtitle": "E2E8F0",     # 亮冷银白次标题（高对比度，清晰醒目，告别发暗）
+        "text_body": "F8FAFC",         # 纯净极白正文（对比度 15:1，极其清晰通透）
+        "text_muted": "94A3B8",        # 优雅银灰（比原 64748B 大幅提升对比度，清晰易读）
+        "badge_bg": "1E293B",          # 科技胶囊背景
         "badge_text": "38BDF8",        # 科技胶囊文本
         "divider": "203254",           # 微光分割线
         "table_header_bg": "1A2B4C",   # 深蓝紫表头
         "table_header_text": "00F0FF", # 发光青表头字
         "table_alt_row": "0E1729",     # 表格深色斑马纹
-        "chart_colors": ["00F0FF", "38BDF8", "F59E0B", "A855F7", "10B981"],
-        "accents": ["00F0FF", "A855F7", "F59E0B", "10B981", "38BDF8", "EC4899"],
+        "chart_colors": ["00F0FF", "38BDF8", "FBBF24", "C084FC", "34D399"],
+        "accents": ["00F0FF", "C084FC", "FBBF24", "34D399", "38BDF8", "F472B6"],
         # 兼容旧字段
-        "text": "CBD5E1", "text_light": "94A3B8",
+        "text": "F8FAFC", "text_light": "E2E8F0",
         "border": "24385E", "bar_bg": "182644", "white": "FFFFFF",
     },
 
@@ -108,10 +108,10 @@ PALETTES = {
         "accent": "2563EB",            # 饱和钴蓝
         "accent_tint": "E0EDFE",
         "accent2": "D97706",           # 优雅金棕
-        "text_title": "0F172A",        # 石板黑大字
-        "text_subtitle": "475569",     # 中石板灰
-        "text_body": "334155",         # 深灰正文
-        "text_muted": "64748B",
+        "text_title": "0A101D",        # 极致对比度石板黑
+        "text_subtitle": "2D3B4E",     # 中深石板灰
+        "text_body": "1E293B",         # 深灰高清晰正文
+        "text_muted": "475569",        # 清晰易读注释
         "badge_bg": "EFF6FF",
         "badge_text": "1D4ED8",
         "divider": "E2E8F0",
@@ -121,7 +121,7 @@ PALETTES = {
         "chart_colors": ["1D4ED8", "0F2748", "D97706", "3B82F6", "64748B"],
         "accents": ["1D4ED8", "0D9488", "D97706", "7C3AED", "BE185D", "059669"],
         # 兼容旧字段
-        "text": "334155", "text_light": "64748B",
+        "text": "1E293B", "text_light": "475569",
         "border": "E2E8F0", "bar_bg": "F1F5F9", "white": "FFFFFF",
     },
 
@@ -140,21 +140,21 @@ PALETTES = {
         "primary_tint": "2B2414",
         "accent": "E0BA53",            # 耀目真金数值
         "accent_tint": "362C16",
-        "accent2": "C29938",
-        "text_title": "FDFBEE",        # 柔和暖象牙白
-        "text_subtitle": "C4BAA3",     # 浅麦秆暖灰
-        "text_body": "E4DEC9",         # 暖白文字
-        "text_muted": "8C826F",
+        "accent2": "F3CF72",
+        "text_title": "FFFFFF",        # 纯白大标题，极致通透
+        "text_subtitle": "EADFC9",     # 亮象牙米白次标题（告别昏暗）
+        "text_body": "FBF8EF",         # 暖白高对比正文
+        "text_muted": "C5BBA6",        # 清晰浅暖灰注释（大幅提升对比度）
         "badge_bg": "2B2414",
-        "badge_text": "E0BA53",
+        "badge_text": "F3CF72",
         "divider": "3D3627",
         "table_header_bg": "2A2417",
         "table_header_text": "E0BA53",
         "table_alt_row": "16161B",
-        "chart_colors": ["E0BA53", "F3CF72", "9E7D23", "E5E7EB", "78716C"],
-        "accents": ["E0BA53", "38BDF8", "F59E0B", "10B981", "C084FC", "F43F5E"],
+        "chart_colors": ["E0BA53", "F3CF72", "38BDF8", "FBBF24", "34D399"],
+        "accents": ["E0BA53", "38BDF8", "FBBF24", "34D399", "C084FC", "F472B6"],
         # 兼容旧字段
-        "text": "E4DEC9", "text_light": "C4BAA3",
+        "text": "FBF8EF", "text_light": "EADFC9",
         "border": "3E382A", "bar_bg": "25252E", "white": "FFFFFF",
     },
 
@@ -174,10 +174,10 @@ PALETTES = {
         "accent": "059669",            # 翡翠绿核心强调
         "accent_tint": "D1FAE5",
         "accent2": "D97706",           # 暖琥珀橙（点缀活跃度）
-        "text_title": "0D4728",        # 极深墨绿黑大标题
-        "text_subtitle": "2D6346",
-        "text_body": "23382C",         # 墨草深灰
-        "text_muted": "5E806C",
+        "text_title": "08361E",        # 极深墨绿黑大标题
+        "text_subtitle": "1C4B33",
+        "text_body": "142E20",         # 墨草深黑正文（高对比度）
+        "text_muted": "3D6650",
         "badge_bg": "E1F5E9",
         "badge_text": "0F7642",
         "divider": "CCE6D6",
@@ -187,7 +187,7 @@ PALETTES = {
         "chart_colors": ["0F7642", "16A34A", "D97706", "3B82F6", "10B981"],
         "accents": ["059669", "0284C7", "D97706", "10B981", "7C3AED", "EC4899"],
         # 兼容旧字段
-        "text": "23382C", "text_light": "5E806C",
+        "text": "142E20", "text_light": "3D6650",
         "border": "CCE6D6", "bar_bg": "EDF7F1", "white": "FFFFFF",
     },
 
@@ -207,10 +207,10 @@ PALETTES = {
         "accent": "D92688",            # 摩登洋红（时尚感十足）
         "accent_tint": "FDE8F4",
         "accent2": "E68A00",           # 金色提亮
-        "text_title": "281052",        # 极深紫黑大标题
-        "text_subtitle": "543D7A",
-        "text_body": "33264A",         # 优雅深紫灰
-        "text_muted": "72618F",
+        "text_title": "1A0836",        # 极深紫黑大标题
+        "text_subtitle": "3D2466",
+        "text_body": "22153B",         # 深紫黑清晰正文
+        "text_muted": "534073",
         "badge_bg": "EFEBFC",
         "badge_text": "53229E",
         "divider": "DED5F9",
@@ -220,7 +220,7 @@ PALETTES = {
         "chart_colors": ["53229E", "7C3AED", "D92688", "E68A00", "06B6D4"],
         "accents": ["7C3AED", "06B6D4", "D92688", "E68A00", "10B981", "3B82F6"],
         # 兼容旧字段
-        "text": "33264A", "text_light": "72618F",
+        "text": "22153B", "text_light": "534073",
         "border": "DED5F9", "bar_bg": "F3EFFD", "white": "FFFFFF",
     },
 
@@ -240,10 +240,10 @@ PALETTES = {
         "accent": "F95738",            # 爆裂活力珊瑚色
         "accent_tint": "FFE9E4",
         "accent2": "2563EB",           # 互补对比宝蓝
-        "text_title": "431407",        # 暖浓黑棕
-        "text_subtitle": "7C4334",
-        "text_body": "3E261F",
-        "text_muted": "87645C",
+        "text_title": "2E0A04",        # 暖浓黑棕大标题
+        "text_subtitle": "5E271B",
+        "text_body": "2B1611",         # 浓郁深褐黑正文
+        "text_muted": "6B4339",
         "badge_bg": "FFECE5",
         "badge_text": "C2410C",
         "divider": "F6D5C4",
@@ -253,7 +253,7 @@ PALETTES = {
         "chart_colors": ["F95738", "EA580C", "2563EB", "10B981", "6B7280"],
         "accents": ["F95738", "EA580C", "2563EB", "10B981", "06B6D4", "D946EF"],
         # 兼容旧字段
-        "text": "3E261F", "text_light": "87645C",
+        "text": "2B1611", "text_light": "6B4339",
         "border": "F6D5C4", "bar_bg": "FCF0EA", "white": "FFFFFF",
     },
 
@@ -273,10 +273,10 @@ PALETTES = {
         "accent": "0891B2",            # 高饱和碧水蓝
         "accent_tint": "CFFAFE",
         "accent2": "F97316",           # 暖亮橙对比
-        "text_title": "164E63",        # 极深墨青黑
-        "text_subtitle": "2D6274",
-        "text_body": "213840",
-        "text_muted": "587D87",
+        "text_title": "0B3B4B",        # 极深墨青黑
+        "text_subtitle": "164E63",
+        "text_body": "11303D",         # 深青黑清晰正文
+        "text_muted": "3B6473",
         "badge_bg": "E0F4F2",
         "badge_text": "0E7490",
         "divider": "C8E5E0",
@@ -286,7 +286,7 @@ PALETTES = {
         "chart_colors": ["0E7490", "06B6D4", "F97316", "10B981", "8B5CF6"],
         "accents": ["0E7490", "06B6D4", "F97316", "10B981", "8B5CF6", "E11D48"],
         # 兼容旧字段
-        "text": "213840", "text_light": "587D87",
+        "text": "11303D", "text_light": "3B6473",
         "border": "C8E5E0", "bar_bg": "EEF7F5", "white": "FFFFFF",
     },
 
@@ -306,10 +306,10 @@ PALETTES = {
         "accent": "B9382E",            # 经典朱砂红（印章点睛与核心数据）
         "accent_tint": "F8E7E5",       # 浅朱印泥淡光
         "accent2": "3D665E",           # 宋代汝窑天青/黛绿
-        "text_title": "1A1D20",        # 极深水墨标题
-        "text_subtitle": "52565E",     # 次级烟墨色
-        "text_body": "2C3035",         # 正文墨黑
-        "text_muted": "7A7F87",
+        "text_title": "111315",        # 极深水墨标题
+        "text_subtitle": "33363D",     # 次级烟墨色
+        "text_body": "181A1D",         # 正文纯墨黑
+        "text_muted": "575B63",
         "badge_bg": "EFE9DD",          # 仿古笺纸胶囊底
         "badge_text": "B9382E",        # 朱砂字色
         "divider": "D8CFC0",
@@ -319,7 +319,7 @@ PALETTES = {
         "chart_colors": ["B9382E", "3D665E", "C89B3C", "355070", "6D597A"],
         "accents": ["B9382E", "3D665E", "C89B3C", "355070", "8A5A44", "495867"],
         # 兼容旧字段
-        "text": "2C3035", "text_light": "7A7F87",
+        "text": "181A1D", "text_light": "575B63",
         "border": "D8CFC0", "bar_bg": "F3EFE6", "white": "FFFFFF",
     },
 }
