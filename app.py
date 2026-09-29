@@ -686,25 +686,45 @@ def api_artifact(
     return rec
 
 
-@app.get("/api/download/{item_id:path}")
-def api_download(
-    item_id: str,
-    authorization: str | None = Header(None),
-    auth_key: str | None = Query(None),
-):
-    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
-        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
+def _safe_resolve_path(item_id: str) -> str | None:
+    """防路径穿越安全解析：确保目标文件必须真实存在且严格位于 OUTPUT_DIR 或 STORE.root 内部。"""
+    raw_id = str(item_id or "").strip()
+    if not raw_id or ".." in raw_id:
+        return None
 
+    # 去除首尾斜杠，仅取基名防止非法路径穿越
+    clean_id = os.path.basename(raw_id)
+    if not clean_id:
+        return None
+
+    target_path = None
     try:
-        path = M.STORE.path_of(item_id)
+        target_path = M.STORE.path_of(clean_id)
     except Exception:
-        cand = os.path.join(M.OUTPUT_DIR, item_id)
+        pass
+
+    if not target_path or not os.path.exists(target_path):
+        cand = os.path.join(M.OUTPUT_DIR, clean_id)
         if not os.path.exists(cand) and not cand.endswith(".pptx"):
             cand += ".pptx"
         if os.path.exists(cand):
-            path = cand
-        else:
-            raise HTTPException(status_code=404, detail=f"文件不存在: {item_id}")
+            target_path = cand
+
+    if target_path and os.path.exists(target_path):
+        abs_target = os.path.abspath(target_path)
+        abs_out = os.path.abspath(M.OUTPUT_DIR)
+        abs_store = os.path.abspath(M.STORE.root)
+        if abs_target.startswith(abs_out) or abs_target.startswith(abs_store):
+            return abs_target
+
+    return None
+
+
+@app.get("/api/download/{item_id:path}")
+def api_download(item_id: str):
+    path = _safe_resolve_path(item_id)
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
 
     media_type = (
         "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -715,25 +735,10 @@ def api_download(
 
 
 @app.get("/api/preview/{item_id:path}")
-def api_preview(
-    item_id: str,
-    page: int = Query(1, ge=1),
-    authorization: str | None = Header(None),
-    auth_key: str | None = Query(None),
-):
-    if AUTH_KEY and not check_auth(authorization=authorization, auth_key=auth_key):
-        raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing AUTH_KEY")
-
-    try:
-        path = M.STORE.path_of(item_id)
-    except Exception:
-        cand = os.path.join(M.OUTPUT_DIR, item_id)
-        if not os.path.exists(cand) and not cand.endswith(".pptx"):
-            cand += ".pptx"
-        if os.path.exists(cand):
-            path = cand
-        else:
-            raise HTTPException(status_code=404, detail=f"文件不存在: {item_id}")
+def api_preview(item_id: str, page: int = Query(1, ge=1)):
+    path = _safe_resolve_path(item_id)
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
 
     if path.lower().endswith(".png"):
         return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})

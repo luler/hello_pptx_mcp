@@ -1150,10 +1150,7 @@ def get_admin_html() -> str:
     }
 
     function withAuthParam(url) {
-      const key = getAuthKey();
-      if (!key) return url;
-      const sep = url.includes("?") ? "&" : "?";
-      return `${url}${sep}auth_key=${encodeURIComponent(key)}`;
+      return url;
     }
 
     function showToast(text, isError = false) {

@@ -167,16 +167,17 @@ def make_unique_filename(filename: str = "", fallback: str = "deck") -> str:
         raw = raw[:-5]
     base = _slug(raw, fallback=fallback)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    rand_tag = uuid.uuid4().hex[:4]
+    import secrets
+    rand_tag = secrets.token_hex(8)
 
     if base.startswith(ts):
         candidate = f"{base}.pptx"
     else:
         candidate = f"{ts}_{rand_tag}_{base}.pptx"
 
-    # 兜底防重（万亿分之一概率碰撞时自旋）
+    # 兜底防重
     while os.path.exists(os.path.join(OUTPUT_DIR, candidate)):
-        rand_tag = uuid.uuid4().hex[:4]
+        rand_tag = secrets.token_hex(8)
         candidate = f"{ts}_{rand_tag}_{base}.pptx"
 
     return candidate

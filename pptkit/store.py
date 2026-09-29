@@ -46,8 +46,8 @@ class Store:
         os.replace(tmp, self._index_path)
 
     def new_id(self, prefix="deck"):
-        import uuid
-        return "%s_%s_%s" % (prefix, time.strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:4])
+        import secrets
+        return "%s_%s_%s" % (prefix, time.strftime("%Y%m%d_%H%M%S"), secrets.token_hex(8))
 
     def register(self, name, kind, path, spec=None, item_id=None, validate=True, compute_sha=False):
         path = os.path.abspath(path)
